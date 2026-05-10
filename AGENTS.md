@@ -30,3 +30,7 @@ Git history currently only shows the initial Create Next App commit, so there is
 ## Security & Configuration Tips
 
 Never commit real secrets, database URLs, API tokens, exported spreadsheets with sensitive data, or local environment files. Keep configuration in environment variables and document required keys with placeholder values only. Review Prisma migrations carefully because they affect persisted dashboard data.
+
+## Production Deployment Notes
+
+Production runs on the DigitalOcean droplet `yangyuen` (`159.89.193.59`). Keep the main app and this dashboard as separate stacks: main `yangyuen` uses app port `3000`, Postgres `5432`, and domain `yangyuen.com`; dashboard `yangyuen-dashboard` uses app port `3001`, Postgres `5433`, and domain `dashboard.yangyuen.com`. Caddy owns public ports `80` and `443` and routes by hostname. Bind app and database service ports to `127.0.0.1` unless there is an explicit reason to expose them publicly.
