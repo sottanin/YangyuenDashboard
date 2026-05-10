@@ -1,0 +1,43 @@
+services:
+  # ──────────────────────────────────────────────
+  # PostgreSQL 16 — unchanged from original config
+  # Host port 5433 → container port 5432
+  # ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: yangyuen
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"     # host:5433 for local psql / Prisma Studio
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d yangyuen"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────────────────────
+  # Next.js web application
+  # ──────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3000"     # host:3001 → container:3000 (3000 used by another project)
+    environment:
+      NODE_ENV: production
+      # Inside Docker, the postgres hostname is the service name "postgres",
+      # NOT localhost. The host machine continues to use localhost:5433.
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/yangyuen?schema=public"
+      NEXT_TELEMETRY_DISABLED: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy   # wait for pg_isready before starting Next.js
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

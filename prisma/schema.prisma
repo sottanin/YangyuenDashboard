@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model TransactionHeader {
+  id        String   @id @default(cuid())
+  txId      String   @unique
+  timestamp DateTime
+  txValue   Decimal  @default(0)
+  fee       Decimal  @default(0)
+  block     BigInt?
+  status    String?
+  result    String?
+  gasPrice  Decimal?
+  gasUsed   Int?
+
+  details   TransactionDetail[]
+
+  @@index([txId])
+  @@index([timestamp])
+}
+
+model TransactionDetail {
+  id           String   @id @default(cuid())
+  key          String   @unique
+  txId         String
+  blockHash    String?
+  fromHash     String
+  toHash       String
+  method       String
+  timestamp    DateTime
+  tokenAddress String
+  tokenName    String
+  tokenSymbol  String
+  tokenType    String
+  decimals     Int?
+  value        Decimal
+  txType       String
+  notify       String?
+
+  header       TransactionHeader @relation(fields: [txId], references: [txId])
+
+  @@index([key])
+  @@index([timestamp])
+  @@index([tokenName])
+  @@index([txType])
+  @@index([fromHash])
+}
+
+model RedemptionTransactionHeader {
+  id        String   @id @default(cuid())
+  txId      String   @unique
+  timestamp DateTime
+  value     Decimal  @default(0)
+  fee       Decimal  @default(0)
+  block     BigInt?
+  status    String?
+  result    String?
+  gasPrice  Decimal?
+  gasUsed   Int?
+
+  details   RedemptionTransactionDetail[]
+
+  @@index([txId])
+  @@index([timestamp])
+}
+
+model RedemptionTransactionDetail {
+  id           String   @id @default(cuid())
+  key          String   @unique
+  txId         String
+  blockHash    String?
+  fromHash     String
+  method       String
+  timestamp    DateTime
+  toHash       String
+  tokenAddress String
+  tokenName    String
+  tokenSymbol  String
+  tokenType    String
+  tokenId      String?
+
+  header       RedemptionTransactionHeader @relation(fields: [txId], references: [txId])
+
+  @@index([key])
+  @@index([timestamp])
+  @@index([txId])
+}
+
+model BatchJobLog {
+  id            String    @id @default(cuid())
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  status        String
+  tokenName     String?
+  tokenAddress  String?
+  totalFetched  Int       @default(0)
+  totalInserted Int       @default(0)
+  totalUpdated  Int       @default(0)
+  pagesScanned  Int       @default(0)
+  stoppedReason String?
+  error         String?
+
+  @@index([startedAt])
+  @@index([status])
+}
+
+model NFTInstance {
+  id           String  @id
+  isUnique     Boolean @default(false)
+  imageUrl     String?
+  name         String
+  ownerHash    String
+  tokenAddress String
+  tokenValue   String?
+  visible      Boolean @default(true)
+}
+
+model Wallet {
+  id               String    @id @default(cuid())
+  walletId         String    @unique
+  timestamp        DateTime?
+  notify           String?
+  balanceICC       Decimal   @default(0)
+  balanceGreen     Decimal   @default(0)
+  balanceTogether  Decimal   @default(0)
+  balanceIntegrity Decimal   @default(0)
+  balanceFit       Decimal   @default(0)
+
+  @@index([walletId])
+}
+
+model TokenContract {
+  id      String @id @default(cuid())
+  name    String @unique
+  address String
+}
+
+model AddressContract {
+  id      String @id @default(cuid())
+  name    String @unique
+  address String
+}
+
+model SystemConfig {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}

@@ -1,0 +1,2 @@
+แก้ไขตาม requirement ดังนี้      
+1. เพิ่มขึ้นตอนสุดท้ายหลังจาก fatch blockchain transaction เสร็จแล้วให้ทำการ merge walletid จากทั้ง fromhash และ tohash ไป update และ insert ในตาราง wallet และทำการดึง balance มาอัพเดทแต่ละ wallet โดยให้ reset zero ทั้งหมดก่อน แล้วค่อยไล่ดึงจาก api มาอัพเดทใหม่ทั้งหมด https://www.kubscan.com/api/v2/addresses/{{WALLETID}}/token-balances และ ให้ลง logs ด้วย
