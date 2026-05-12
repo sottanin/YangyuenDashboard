@@ -34,6 +34,10 @@ services:
       # NOT localhost. The host machine continues to use localhost:5433.
       DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/yangyuen?schema=public"
       NEXT_TELEMETRY_DISABLED: "1"
+      # Required: set AUTH_SECRET in .env on the host (never hardcode here)
+      AUTH_SECRET: ${AUTH_SECRET}
+      # Optional: set initial superadmin password on first deploy; omit to auto-generate
+      SUPERADMIN_INITIAL_PASSWORD: ${SUPERADMIN_INITIAL_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy   # wait for pg_isready before starting Next.js
