@@ -17,6 +17,18 @@ interface BatchJobLog {
   error: string | null
 }
 
+type JobKey = 'token_sync' | 'redemption' | 'wallet_sync' | 'fee_update' | 'nft_instance'
+
+const JOBS: { key: JobKey; label: string; desc: string }[] = [
+  { key: 'token_sync',   label: 'Token Sync',          desc: 'ดึง ERC-20 transfers ทุก token' },
+  { key: 'redemption',   label: 'NFT Redemption',       desc: 'ดึง ERC-721 transfers + upsert NFT' },
+  { key: 'wallet_sync',  label: 'Wallet Sync',          desc: 'อัปเดต balance ทุก wallet' },
+  { key: 'fee_update',   label: 'Fee Update',           desc: 'เติม fee/gas ที่ยังเป็น 0' },
+  { key: 'nft_instance', label: 'NFT Instance Update',  desc: 'อัปเดต metadata + tokenValue' },
+]
+
+const ALL_KEYS = JOBS.map((j) => j.key)
+
 function StatusPill({ status }: { status: string }) {
   const cls =
     status === 'completed' ? 'pill pill-success' :
@@ -36,7 +48,9 @@ export default function BatchLogsPage() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
-  const [running, setRunning] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [selected, setSelected] = useState<Set<JobKey>>(new Set(ALL_KEYS))
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null)
   const limit = 20
 
@@ -48,11 +62,8 @@ export default function BatchLogsPage() {
     setLoading(false)
   }, [page])
 
-  useEffect(() => {
-    fetchLogs()
-  }, [fetchLogs])
+  useEffect(() => { fetchLogs() }, [fetchLogs])
 
-  // Auto-refresh when any log is running
   useEffect(() => {
     const hasRunning = logs.some((l) => l.status === 'running')
     if (!hasRunning) return
@@ -60,47 +71,137 @@ export default function BatchLogsPage() {
     return () => clearInterval(timer)
   }, [logs, fetchLogs])
 
-  async function handleRunNow() {
-    setRunning(true)
+  function showToast(msg: string, type: 'ok' | 'err') {
+    setToast({ msg, type })
+    setTimeout(() => setToast(null), 4000)
+  }
+
+  function toggleJob(key: JobKey) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+
+  function toggleAll() {
+    setSelected((prev) => prev.size === ALL_KEYS.length ? new Set() : new Set(ALL_KEYS))
+  }
+
+  async function handleRun() {
+    if (selected.size === 0) return
+    setSubmitting(true)
     try {
-      const res = await fetch('/api/batch/run', { method: 'POST' })
+      const jobs = selected.size === ALL_KEYS.length ? undefined : Array.from(selected)
+      const body = jobs ? JSON.stringify({ jobs }) : undefined
+      const res = await fetch('/api/batch/run', {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body,
+      })
       const data = await res.json()
-      if (res.ok) {
-        setToast({ msg: data.message, type: 'ok' })
-        fetchLogs()
-      } else {
-        setToast({ msg: data.message || data.error, type: 'err' })
-      }
+      res.ok ? showToast(data.message, 'ok') : showToast(data.message || data.error, 'err')
+      if (res.ok) fetchLogs()
     } catch {
-      setToast({ msg: 'Network error', type: 'err' })
+      showToast('Network error', 'err')
     } finally {
-      setRunning(false)
-      setTimeout(() => setToast(null), 4000)
+      setSubmitting(false)
     }
   }
 
+  async function handleCancel() {
+    setCancelling(true)
+    try {
+      const res = await fetch('/api/batch/cancel', { method: 'POST' })
+      const data = await res.json()
+      showToast(`Marked ${data.cancelled} job(s) as failed`, 'ok')
+      fetchLogs()
+    } catch {
+      showToast('Failed to cancel', 'err')
+    } finally {
+      setCancelling(false)
+    }
+  }
+
+  const hasRunning = logs.some((l) => l.status === 'running')
+  const allSelected = selected.size === ALL_KEYS.length
   const totalPages = Math.ceil(total / limit)
 
   return (
-    <div className="p-6 space-y-6 animate-in">
+    <div className="p-6 space-y-5 animate-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-default">Batch Job Logs</h1>
-          <p className="text-sm text-muted mt-0.5">Blockchain data fetch history — {total} records</p>
+      <div>
+        <h1 className="text-xl font-semibold text-default">Batch Job Logs</h1>
+        <p className="text-sm text-muted mt-0.5">Blockchain data fetch history — {total} records</p>
+      </div>
+
+      {/* Run panel */}
+      <div className="glass rounded-2xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-default">เลือก Job ที่ต้องการรัน</span>
+          <button
+            onClick={toggleAll}
+            className="text-xs text-muted hover:text-default transition-colors"
+          >
+            {allSelected ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
+          </button>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={handleRunNow}
-          disabled={running}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <polyline points="23 4 23 10 17 10" />
-            <polyline points="1 20 1 14 7 14" />
-            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-          </svg>
-          {running ? 'Starting…' : 'Run Now'}
-        </button>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {JOBS.map(({ key, label, desc }) => {
+            const checked = selected.has(key)
+            return (
+              <label
+                key={key}
+                className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all select-none
+                  ${checked
+                    ? 'border-accent/40 bg-accent/5'
+                    : 'border-default bg-transparent hover:bg-white/3'}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleJob(key)}
+                  className="mt-0.5 accent-indigo-500 w-4 h-4 shrink-0"
+                />
+                <div>
+                  <div className="text-sm font-medium text-default leading-tight">{label}</div>
+                  <div className="text-xs text-muted mt-0.5 leading-snug">{desc}</div>
+                </div>
+              </label>
+            )
+          })}
+        </div>
+
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            className="btn btn-primary"
+            onClick={handleRun}
+            disabled={submitting || selected.size === 0}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+            </svg>
+            {submitting ? 'Starting…' : `Run ${selected.size === ALL_KEYS.length ? 'All' : `${selected.size} Job${selected.size > 1 ? 's' : ''}`}`}
+          </button>
+
+          {hasRunning && (
+            <button
+              className="btn btn-ghost text-red-400 hover:text-red-300 text-sm"
+              onClick={handleCancel}
+              disabled={cancelling}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="15" y1="9" x2="9" y2="15" />
+                <line x1="9" y1="9" x2="15" y2="15" />
+              </svg>
+              {cancelling ? 'Cancelling…' : 'Stop & Mark Failed'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Toast */}
@@ -142,7 +243,7 @@ export default function BatchLogsPage() {
               ) : logs.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="px-4 py-12 text-center text-muted">
-                    No batch job logs yet. Click &quot;Run Now&quot; to start.
+                    No batch job logs yet. เลือก job แล้วกด Run เพื่อเริ่ม
                   </td>
                 </tr>
               ) : logs.map((log) => (
@@ -169,21 +270,12 @@ export default function BatchLogsPage() {
           </table>
         </div>
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="px-4 py-3 border-t border-default flex items-center justify-between">
             <span className="text-xs text-muted">Page {page} of {totalPages}</span>
             <div className="flex gap-2">
-              <button
-                className="btn btn-ghost text-xs"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-              >Prev</button>
-              <button
-                className="btn btn-ghost text-xs"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-              >Next</button>
+              <button className="btn btn-ghost text-xs" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>Prev</button>
+              <button className="btn btn-ghost text-xs" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Next</button>
             </div>
           </div>
         )}

@@ -9,8 +9,9 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: 'Yangyuen Admin — Nexus Dashboard',
-  description: 'Blockchain loyalty token analytics dashboard for Yangyuen',
+  title: 'Yangyuen Data Analysis',
+  description: 'Blockchain data analysis platform for the Yangyuen loyalty ecosystem',
+  icons: { icon: '/favicon.svg' },
 }
 
 export default function RootLayout({

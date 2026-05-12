@@ -3,12 +3,15 @@ import { prisma } from '@/lib/prisma'
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const body = await req.json()
-  const { name, address } = body
+  const body = await req.json() as { name?: string; address?: string; workspaceId?: number | null }
+  const { name, address, workspaceId } = body
   if (!name || !address) {
     return NextResponse.json({ error: 'name and address are required' }, { status: 400 })
   }
-  const record = await prisma.addressContract.update({ where: { id }, data: { name, address } })
+  const record = await prisma.addressContract.update({
+    where: { id },
+    data: { name, address, workspaceId: workspaceId ?? null },
+  })
   return NextResponse.json(record)
 }
 

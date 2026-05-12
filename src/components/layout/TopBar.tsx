@@ -1,12 +1,21 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useTheme } from '@/components/ThemeProvider'
 import { Icon } from '@/components/ui/Icon'
+import { useWorkspace } from '@/lib/WorkspaceContext'
 
 interface TopBarProps {
   onToggleSidebar: () => void
   currentPageLabel: string
+  admin: {
+    name: string
+    email: string | null
+    username: string
+    role: string
+  }
 }
 
 const NOTIFICATIONS = [
@@ -16,21 +25,34 @@ const NOTIFICATIONS = [
   { type: 'muted', title: 'Weekly report ready', body: 'Your blockchain activity summary is available', time: '3h ago' },
 ]
 
-export function TopBar({ onToggleSidebar, currentPageLabel }: TopBarProps) {
+export function TopBar({ onToggleSidebar, currentPageLabel, admin }: TopBarProps) {
   const { mode, setMode } = useTheme()
+  const router = useRouter()
+  const { selected, setSelected, workspaces } = useWorkspace()
   const [notifOpen, setNotifOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [wsOpen, setWsOpen] = useState(false)
 
   useEffect(() => {
     const onClick = () => {
       setNotifOpen(false)
       setProfileOpen(false)
+      setWsOpen(false)
     }
-    if (notifOpen || profileOpen) {
+    if (notifOpen || profileOpen || wsOpen) {
       document.addEventListener('click', onClick)
       return () => document.removeEventListener('click', onClick)
     }
-  }, [notifOpen, profileOpen])
+  }, [notifOpen, profileOpen, wsOpen])
+
+  async function signOut() {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    router.replace('/admin/login')
+    router.refresh()
+  }
+
+  const allOption = { id: 'all' as const, name: 'All Workspaces' }
+  const wsOptions = [allOption, ...workspaces]
 
   return (
     <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-6 px-6 pt-4 pb-3 glass-strong border-b border-default">
@@ -47,13 +69,66 @@ export function TopBar({ onToggleSidebar, currentPageLabel }: TopBarProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Workspace selector */}
+          <div className="relative">
+            <button
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-default hover:bg-surface-2 transition"
+              style={{ borderColor: 'rgb(var(--accent) / 0.4)', background: 'rgb(var(--accent) / 0.06)' }}
+              onClick={(e) => {
+                e.stopPropagation()
+                setWsOpen(!wsOpen)
+                setNotifOpen(false)
+                setProfileOpen(false)
+              }}
+            >
+              <Icon name="box" size={12} />
+              <span className="max-w-[140px] truncate" style={{ color: 'rgb(var(--accent))' }}>
+                {selected.name}
+              </span>
+              <Icon name="chevD" size={10} className="text-faint" />
+            </button>
+            {wsOpen && (
+              <div
+                className="absolute right-0 top-full mt-2 w-52 glass-strong rounded-xl border border-default shadow-lg overflow-hidden z-50"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-3 py-2 border-b border-default">
+                  <div className="text-[10px] font-medium text-muted uppercase tracking-wider">Select Workspace</div>
+                </div>
+                <div className="p-1 max-h-60 overflow-y-auto thin-scroll">
+                  {wsOptions.map((ws) => (
+                    <button
+                      key={ws.id}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left transition ${
+                        selected.id === ws.id ? 'bg-surface-2 font-medium text-default' : 'text-default hover:bg-surface-2'
+                      }`}
+                      onClick={() => {
+                        setSelected(ws)
+                        setWsOpen(false)
+                      }}
+                    >
+                      <div
+                        className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
+                        style={{ background: ws.id === 'all' ? 'rgb(var(--text-muted))' : 'linear-gradient(135deg, rgb(var(--accent-2)), rgb(var(--accent-3)))' }}
+                      >
+                        {ws.id === 'all' ? '∞' : ws.name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <span className="flex-1 truncate">{ws.name}</span>
+                      {selected.id === ws.id && <Icon name="check" size={11} className="text-accent flex-shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Search */}
           <div className="relative hidden md:block">
             <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input
               className="input pl-9 pr-12"
               placeholder="Search transactions, wallets..."
-              style={{ width: 280 }}
+              style={{ width: 260 }}
             />
             <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-2 text-faint border border-default">
               ⌘K
@@ -82,6 +157,7 @@ export function TopBar({ onToggleSidebar, currentPageLabel }: TopBarProps) {
                 e.stopPropagation()
                 setNotifOpen(!notifOpen)
                 setProfileOpen(false)
+                setWsOpen(false)
               }}
             >
               <Icon name="bell" size={15} />
@@ -134,10 +210,13 @@ export function TopBar({ onToggleSidebar, currentPageLabel }: TopBarProps) {
                 e.stopPropagation()
                 setProfileOpen(!profileOpen)
                 setNotifOpen(false)
+                setWsOpen(false)
               }}
             >
-              <div className="avatar" style={{ width: 28, height: 28, fontSize: '10px' }}>AD</div>
-              <span className="hidden sm:inline text-xs font-medium text-default">Admin</span>
+              <div className="avatar" style={{ width: 28, height: 28, fontSize: '10px' }}>
+                {admin.name.slice(0, 2).toUpperCase()}
+              </div>
+              <span className="hidden sm:inline text-xs font-medium text-default">{admin.name}</span>
               <Icon name="chevD" size={11} className="text-faint" />
             </button>
             {profileOpen && (
@@ -146,25 +225,30 @@ export function TopBar({ onToggleSidebar, currentPageLabel }: TopBarProps) {
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="px-3 py-3 border-b border-default">
-                  <div className="text-xs font-semibold text-default">Admin</div>
-                  <div className="text-[10.5px] text-faint">admin@yangyuen.io</div>
+                  <div className="text-xs font-semibold text-default">{admin.name}</div>
+                  <div className="text-[10.5px] text-faint">{admin.email || admin.username}</div>
                 </div>
                 <div className="p-1">
                   {[
-                    { label: 'Profile', icon: 'user' },
-                    { label: 'Settings', icon: 'gear' },
+                    { label: 'Profile', icon: 'user', href: '/dashboard/settings' },
+                    { label: 'Admin Users', icon: 'users', href: '/dashboard/admin-users' },
+                    { label: 'Settings', icon: 'gear', href: '/dashboard/settings' },
                   ].map((item) => (
-                    <button
+                    <Link
                       key={item.label}
+                      href={item.href}
                       className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-default hover:bg-surface-2"
                     >
                       <Icon name={item.icon} size={13} />
                       {item.label}
-                    </button>
+                    </Link>
                   ))}
                 </div>
                 <div className="border-t border-default p-1">
-                  <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-default hover:bg-surface-2">
+                  <button
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-default hover:bg-surface-2"
+                    onClick={signOut}
+                  >
                     <Icon name="lock" size={13} />
                     Sign out
                   </button>

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 
 const ALLOWED_KEYS = ['batchCutoffDays'] as const
 const ALLOWED_VALUES: Record<string, string[]> = {
-  batchCutoffDays: ['7'],
+  batchCutoffDays: ['7', '30', 'all'],
 }
 
 export async function GET() {

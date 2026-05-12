@@ -11,10 +11,15 @@ function cutoffDate(days: number): Date {
   return d
 }
 
-function parseDecimal(v: unknown): Prisma.Decimal {
+// Convert raw blockchain wei value to Decimal using BigInt string manipulation (avoids float precision loss)
+function fromWei(v: unknown, decimals = 18): Prisma.Decimal {
   if (v === null || v === undefined || v === '') return new Prisma.Decimal(0)
-  const n = Number(v)
-  return isNaN(n) ? new Prisma.Decimal(0) : new Prisma.Decimal(n)
+  const raw = String(v).trim().replace(/\..*$/, '') // strip any fractional part — raw wei is always integer
+  if (!/^\d+$/.test(raw) || raw === '0') return new Prisma.Decimal(0)
+  const padded = raw.padStart(decimals + 1, '0')
+  const intPart = padded.slice(0, padded.length - decimals) || '0'
+  const fracPart = padded.slice(padded.length - decimals)
+  return new Prisma.Decimal(`${intPart}.${fracPart}`)
 }
 
 interface KubScanItem {
@@ -36,19 +41,45 @@ interface KubScanResponse {
   next_page_params?: { block_number: number; index: number } | null
 }
 
+interface KubScanTxResponse {
+  fee?: { type?: string; value?: string }
+  gas_price?: string
+  gas_used?: number | string
+  status?: string
+  result?: string
+}
+
+interface NFTAttribute {
+  trait_type: string
+  value: string | number
+}
+
 interface NFTInstanceResponse {
   id: string
   is_unique?: boolean
-  metadata?: { image?: string; name?: string }
+  metadata?: { image?: string; name?: string; attributes?: NFTAttribute[] }
   owner?: { hash?: string }
   token?: { address?: string; value?: string }
 }
 
+function extractOriginalPrice(attrs?: NFTAttribute[]): Prisma.Decimal | null {
+  if (!attrs) return null
+  const trait = attrs.find((a) => a.trait_type === 'Original Price')
+  if (!trait) return null
+  return fromWei(trait.value)
+}
+
 export async function runBatchJob(): Promise<void> {
   const config = await prisma.systemConfig.findUnique({ where: { key: 'batchCutoffDays' } })
-  const rawDays = parseInt(config?.value ?? '7', 10)
-  const cutoffDays = rawDays <= 0 || rawDays > 7 ? 7 : rawDays
-  const cutoff = cutoffDate(cutoffDays)
+  const configValue = config?.value ?? '7'
+  let cutoff: Date | null = null
+  if (configValue === 'all') {
+    cutoff = null
+  } else {
+    const rawDays = parseInt(configValue, 10)
+    const cutoffDays = isNaN(rawDays) || rawDays <= 0 ? 7 : rawDays
+    cutoff = cutoffDate(cutoffDays)
+  }
 
   const tokens = await prisma.tokenContract.findMany()
 
@@ -121,7 +152,7 @@ export async function runBatchJob(): Promise<void> {
             tokenSymbol: item.token?.symbol || '',
             tokenType: item.token?.type || 'ERC-20',
             decimals: item.total?.decimals ? parseInt(item.total.decimals, 10) : null,
-            value: parseDecimal(item.total?.value),
+            value: fromWei(item.total?.value, item.total?.decimals ? parseInt(item.total.decimals, 10) : 18),
             txType: item.type || 'token_transfer',
           }
 
@@ -321,6 +352,7 @@ async function upsertNFTInstance(tokenId: string): Promise<void> {
     const res = await fetch(`${KUBSCAN_BASE}/${NFT_CONTRACT}/instances/${tokenId}`)
     if (!res.ok) return
     const data: NFTInstanceResponse = await res.json()
+    const tokenValue = extractOriginalPrice(data.metadata?.attributes)
     await prisma.nFTInstance.upsert({
       where: { id: tokenId },
       create: {
@@ -330,7 +362,7 @@ async function upsertNFTInstance(tokenId: string): Promise<void> {
         name: data.metadata?.name || 'Unknown NFT',
         ownerHash: data.owner?.hash || 'unknown',
         tokenAddress: data.token?.address || NFT_CONTRACT,
-        tokenValue: data.token?.value ?? null,
+        tokenValue: tokenValue ?? null,
         visible: true,
       },
       update: {
@@ -339,7 +371,7 @@ async function upsertNFTInstance(tokenId: string): Promise<void> {
         name: data.metadata?.name || 'Unknown NFT',
         ownerHash: data.owner?.hash || 'unknown',
         tokenAddress: data.token?.address || NFT_CONTRACT,
-        tokenValue: data.token?.value ?? null,
+        tokenValue: tokenValue ?? null,
       },
     })
   } catch {
@@ -349,9 +381,13 @@ async function upsertNFTInstance(tokenId: string): Promise<void> {
 
 export async function runRedemptionBatchJob(): Promise<void> {
   const config = await prisma.systemConfig.findUnique({ where: { key: 'batchCutoffDays' } })
-  const rawDays = parseInt(config?.value ?? '7', 10)
-  const cutoffDays = rawDays <= 0 || rawDays > 7 ? 7 : rawDays
-  const cutoff = cutoffDate(cutoffDays)
+  const configValue = config?.value ?? '7'
+  let cutoff: Date | null = null
+  if (configValue !== 'all') {
+    const rawDays = parseInt(configValue, 10)
+    const cutoffDays = isNaN(rawDays) || rawDays <= 0 ? 7 : rawDays
+    cutoff = cutoffDate(cutoffDays)
+  }
 
   const log = await prisma.batchJobLog.create({
     data: {
@@ -382,7 +418,7 @@ export async function runRedemptionBatchJob(): Promise<void> {
       for (const item of items) {
         const ts = new Date(item.timestamp)
 
-        if (ts < cutoff) {
+        if (cutoff !== null && ts < cutoff) {
           done = true
           stoppedReason = 'cutoff_reached'
           break
@@ -462,6 +498,187 @@ export async function runRedemptionBatchJob(): Promise<void> {
         totalInserted,
         totalUpdated,
         pagesScanned,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    })
+  }
+}
+
+const KUBSCAN_TX = 'https://www.kubscan.com/api/v2/transactions'
+const FEE_BATCH_SIZE = 10
+
+export async function runFeeUpdateJob(): Promise<void> {
+  const log = await prisma.batchJobLog.create({
+    data: { status: 'running', tokenName: 'FeeUpdate', tokenAddress: 'all' },
+  })
+
+  let totalFetched = 0
+  let totalUpdated = 0
+  let errorCount = 0
+
+  try {
+    const [txHeaders, rTxHeaders] = await Promise.all([
+      prisma.transactionHeader.findMany({ where: { fee: 0 }, select: { txId: true } }),
+      prisma.redemptionTransactionHeader.findMany({ where: { fee: 0 }, select: { txId: true } }),
+    ])
+
+    totalFetched = txHeaders.length + rTxHeaders.length
+    console.log(`[FeeUpdate] ${txHeaders.length} TX headers, ${rTxHeaders.length} Redemption headers with fee=0`)
+
+    for (let i = 0; i < txHeaders.length; i += FEE_BATCH_SIZE) {
+      const batch = txHeaders.slice(i, i + FEE_BATCH_SIZE)
+      await Promise.all(
+        batch.map(async ({ txId }) => {
+          try {
+            const res = await fetch(`${KUBSCAN_TX}/${txId}`)
+            if (!res.ok) return
+            const data: KubScanTxResponse = await res.json()
+            const fee = fromWei(data.fee?.value)
+            if (fee.gt(0)) {
+              await prisma.transactionHeader.update({
+                where: { txId },
+                data: {
+                  fee,
+                  gasPrice: data.gas_price ? fromWei(data.gas_price) : undefined,
+                  gasUsed: data.gas_used != null ? parseInt(String(data.gas_used), 10) : undefined,
+                  status: data.status ?? undefined,
+                  result: data.result ?? undefined,
+                },
+              })
+              totalUpdated++
+            }
+          } catch {
+            errorCount++
+          }
+        }),
+      )
+    }
+
+    for (let i = 0; i < rTxHeaders.length; i += FEE_BATCH_SIZE) {
+      const batch = rTxHeaders.slice(i, i + FEE_BATCH_SIZE)
+      await Promise.all(
+        batch.map(async ({ txId }) => {
+          try {
+            const res = await fetch(`${KUBSCAN_TX}/${txId}`)
+            if (!res.ok) return
+            const data: KubScanTxResponse = await res.json()
+            const fee = fromWei(data.fee?.value)
+            if (fee.gt(0)) {
+              await prisma.redemptionTransactionHeader.update({
+                where: { txId },
+                data: {
+                  fee,
+                  gasPrice: data.gas_price ? fromWei(data.gas_price) : undefined,
+                  gasUsed: data.gas_used != null ? parseInt(String(data.gas_used), 10) : undefined,
+                  status: data.status ?? undefined,
+                  result: data.result ?? undefined,
+                },
+              })
+              totalUpdated++
+            }
+          } catch {
+            errorCount++
+          }
+        }),
+      )
+    }
+
+    console.log(`[FeeUpdate] Done — fetched:${totalFetched} updated:${totalUpdated} errors:${errorCount}`)
+
+    await prisma.batchJobLog.update({
+      where: { id: log.id },
+      data: {
+        finishedAt: new Date(),
+        status: 'completed',
+        totalFetched,
+        totalUpdated,
+        pagesScanned: errorCount,
+        stoppedReason: 'fee_update_done',
+      },
+    })
+  } catch (err) {
+    console.error('[FeeUpdate] Fatal error:', err)
+    await prisma.batchJobLog.update({
+      where: { id: log.id },
+      data: {
+        finishedAt: new Date(),
+        status: 'failed',
+        totalFetched,
+        totalUpdated,
+        pagesScanned: errorCount,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    })
+  }
+}
+
+const NFT_BATCH_SIZE = 10
+
+export async function runNFTInstanceUpdateJob(): Promise<void> {
+  const log = await prisma.batchJobLog.create({
+    data: { status: 'running', tokenName: 'NFTInstanceUpdate', tokenAddress: NFT_CONTRACT },
+  })
+
+  let totalFetched = 0
+  let totalUpdated = 0
+  let errorCount = 0
+
+  try {
+    const instances = await prisma.nFTInstance.findMany({ select: { id: true } })
+    totalFetched = instances.length
+    console.log(`[NFTInstanceUpdate] Processing ${totalFetched} NFT instances`)
+
+    for (let i = 0; i < instances.length; i += NFT_BATCH_SIZE) {
+      const batch = instances.slice(i, i + NFT_BATCH_SIZE)
+      await Promise.all(
+        batch.map(async ({ id }) => {
+          try {
+            const res = await fetch(`${KUBSCAN_BASE}/${NFT_CONTRACT}/instances/${id}`)
+            if (!res.ok) return
+            const data: NFTInstanceResponse = await res.json()
+            const tokenValue = extractOriginalPrice(data.metadata?.attributes)
+            await prisma.nFTInstance.update({
+              where: { id },
+              data: {
+                isUnique: data.is_unique ?? false,
+                imageUrl: data.metadata?.image ?? null,
+                name: data.metadata?.name || 'Unknown NFT',
+                ownerHash: data.owner?.hash || 'unknown',
+                tokenAddress: data.token?.address || NFT_CONTRACT,
+                tokenValue: tokenValue ?? null,
+              },
+            })
+            totalUpdated++
+          } catch {
+            errorCount++
+          }
+        }),
+      )
+    }
+
+    console.log(`[NFTInstanceUpdate] Done — fetched:${totalFetched} updated:${totalUpdated} errors:${errorCount}`)
+
+    await prisma.batchJobLog.update({
+      where: { id: log.id },
+      data: {
+        finishedAt: new Date(),
+        status: 'completed',
+        totalFetched,
+        totalUpdated,
+        pagesScanned: errorCount,
+        stoppedReason: 'nft_instance_update_done',
+      },
+    })
+  } catch (err) {
+    console.error('[NFTInstanceUpdate] Fatal error:', err)
+    await prisma.batchJobLog.update({
+      where: { id: log.id },
+      data: {
+        finishedAt: new Date(),
+        status: 'failed',
+        totalFetched,
+        totalUpdated,
+        pagesScanned: errorCount,
         error: err instanceof Error ? err.message : String(err),
       },
     })

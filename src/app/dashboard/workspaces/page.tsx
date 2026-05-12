@@ -1,82 +1,64 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useWorkspace } from '@/lib/WorkspaceContext'
 
-interface Workspace { id: number; name: string }
-interface Contract { id: string; name: string; address: string; workspaceId: number | null; workspace: Workspace | null }
+interface Workspace {
+  id: number
+  name: string
+  description: string | null
+  _count: { tokenContracts: number; addressContracts: number }
+}
 
-function ContractTable({
-  type,
-  endpoint,
-}: {
-  type: string
-  endpoint: string
-}) {
-  const [rows, setRows] = useState<Contract[]>([])
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+export default function WorkspacesPage() {
+  const { refresh: refreshContext } = useWorkspace()
+  const [rows, setRows] = useState<Workspace[]>([])
   const [loading, setLoading] = useState(true)
-  const [modal, setModal] = useState<{ open: boolean; row: Contract | null }>({ open: false, row: null })
-  const [form, setForm] = useState({ name: '', address: '', workspaceId: '' })
+  const [modal, setModal] = useState<{ open: boolean; row: Workspace | null }>({ open: false, row: null })
+  const [form, setForm] = useState({ name: '', description: '' })
   const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState<string | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState<Contract | null>(null)
+  const [deleting, setDeleting] = useState<number | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<Workspace | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
-    const [contractsRes, wsRes] = await Promise.all([
-      fetch(endpoint),
-      fetch('/api/workspaces'),
-    ])
-    setRows(await contractsRes.json())
-    setWorkspaces(await wsRes.json())
+    const res = await fetch('/api/workspaces')
+    setRows(await res.json())
     setLoading(false)
   }
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  function defaultWsId(ws: Workspace[]) {
-    const sys = ws.find((w) => w.name === 'SYSTEM')
-    return sys ? String(sys.id) : ''
-  }
+  useEffect(() => { load() }, [])
 
   function openAdd() {
-    setForm({ name: '', address: '', workspaceId: defaultWsId(workspaces) })
+    setForm({ name: '', description: '' })
     setError(null)
     setModal({ open: true, row: null })
   }
 
-  function openEdit(row: Contract) {
-    setForm({ name: row.name, address: row.address, workspaceId: row.workspaceId ? String(row.workspaceId) : defaultWsId(workspaces) })
+  function openEdit(row: Workspace) {
+    setForm({ name: row.name, description: row.description ?? '' })
     setError(null)
     setModal({ open: true, row })
   }
 
   async function save() {
-    if (!form.name.trim() || !form.address.trim()) {
-      setError('Name and address are required')
-      return
-    }
+    if (!form.name.trim()) { setError('Name is required'); return }
     setSaving(true)
     setError(null)
     try {
-      const payload = {
-        name: form.name,
-        address: form.address,
-        workspaceId: form.workspaceId ? parseInt(form.workspaceId) : null,
-      }
       let res: Response
       if (modal.row) {
-        res = await fetch(`${endpoint}/${modal.row.id}`, {
+        res = await fetch(`/api/workspaces/${modal.row.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(form),
         })
       } else {
-        res = await fetch(endpoint, {
+        res = await fetch('/api/workspaces', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(form),
         })
       }
       if (!res.ok) {
@@ -85,30 +67,51 @@ function ContractTable({
         return
       }
       setModal({ open: false, row: null })
-      load()
+      await load()
+      refreshContext()
     } finally {
       setSaving(false)
     }
   }
 
-  async function doDelete(row: Contract) {
+  async function doDelete(row: Workspace) {
     setDeleting(row.id)
-    await fetch(`${endpoint}/${row.id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/workspaces/${row.id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      const d = await res.json()
+      setError(d.error || 'Delete failed')
+    }
     setDeleting(null)
     setConfirmDelete(null)
-    load()
+    await load()
+    refreshContext()
+  }
+
+  const canDelete = (row: Workspace) =>
+    row.name !== 'SYSTEM' && row._count.tokenContracts === 0 && row._count.addressContracts === 0
+
+  const deleteTooltip = (row: Workspace) => {
+    if (row.name === 'SYSTEM') return 'Cannot delete the SYSTEM workspace'
+    const total = row._count.tokenContracts + row._count.addressContracts
+    if (total > 0) return `Cannot delete: ${total} contract(s) linked`
+    return 'Delete workspace'
   }
 
   return (
-    <>
+    <div className="p-6 space-y-6 animate-in">
+      <div>
+        <h1 className="text-xl font-semibold text-default">Workspaces</h1>
+        <p className="text-sm text-muted mt-0.5">Manage workspaces for organizing contracts and data views</p>
+      </div>
+
       <div className="glass rounded-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-default">
-          <span className="font-medium text-default">{type}</span>
+          <span className="font-medium text-default">All Workspaces</span>
           <button className="btn btn-primary text-xs" onClick={openAdd}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            Add
+            Add Workspace
           </button>
         </div>
         <div className="overflow-x-auto thin-scroll">
@@ -116,8 +119,9 @@ function ContractTable({
             <thead>
               <tr className="border-b border-default">
                 <th className="text-left px-5 py-3 text-muted font-medium">Name</th>
-                <th className="text-left px-5 py-3 text-muted font-medium">Address</th>
-                <th className="text-left px-5 py-3 text-muted font-medium">Workspace</th>
+                <th className="text-left px-5 py-3 text-muted font-medium">Description</th>
+                <th className="text-left px-5 py-3 text-muted font-medium">Token Contracts</th>
+                <th className="text-left px-5 py-3 text-muted font-medium">Address Contracts</th>
                 <th className="px-5 py-3 w-24" />
               </tr>
             </thead>
@@ -126,25 +130,40 @@ function ContractTable({
                 Array.from({ length: 3 }).map((_, i) => (
                   <tr key={i} className="border-b border-default">
                     <td className="px-5 py-3"><div className="shimmer h-4 rounded w-32" /></td>
-                    <td className="px-5 py-3"><div className="shimmer h-4 rounded w-64" /></td>
-                    <td className="px-5 py-3"><div className="shimmer h-4 rounded w-20" /></td>
+                    <td className="px-5 py-3"><div className="shimmer h-4 rounded w-48" /></td>
+                    <td className="px-5 py-3"><div className="shimmer h-4 rounded w-12" /></td>
+                    <td className="px-5 py-3"><div className="shimmer h-4 rounded w-12" /></td>
                     <td className="px-5 py-3" />
                   </tr>
                 ))
               ) : rows.length === 0 ? (
-                <tr><td colSpan={4} className="px-5 py-10 text-center text-muted">No records yet</td></tr>
+                <tr><td colSpan={5} className="px-5 py-10 text-center text-muted">No workspaces yet</td></tr>
               ) : rows.map((row) => (
                 <tr key={row.id} className="tbl-row border-b border-default last:border-0">
-                  <td className="px-5 py-3 font-medium text-default">{row.name}</td>
-                  <td className="px-5 py-3 text-muted font-mono text-xs">{row.address}</td>
-                  <td className="px-5 py-3">
-                    {row.workspace ? (
-                      <span className="pill pill-accent text-[10px]" style={{ padding: '1px 8px' }}>
-                        {row.workspace.name}
-                      </span>
-                    ) : (
-                      <span className="text-faint text-xs">—</span>
-                    )}
+                  <td className="px-5 py-3 font-medium text-default">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+                        style={{ background: 'linear-gradient(135deg, rgb(var(--accent-2)), rgb(var(--accent-3)))' }}
+                      >
+                        {row.name.slice(0, 2).toUpperCase()}
+                      </div>
+                      {row.name}
+                      {row.name === 'SYSTEM' && (
+                        <span className="pill pill-accent text-[10px]" style={{ padding: '1px 6px' }}>System</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-5 py-3 text-muted">{row.description || '—'}</td>
+                  <td className="px-5 py-3 text-center">
+                    <span className="pill" style={{ background: 'rgb(var(--accent) / 0.1)', color: 'rgb(var(--accent))' }}>
+                      {row._count.tokenContracts}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3 text-center">
+                    <span className="pill" style={{ background: 'rgb(var(--accent-3) / 0.1)', color: 'rgb(var(--accent-3))' }}>
+                      {row._count.addressContracts}
+                    </span>
                   </td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2 justify-end">
@@ -155,10 +174,10 @@ function ContractTable({
                         </svg>
                       </button>
                       <button
-                        className="btn btn-ghost btn-icon text-red-400"
-                        onClick={() => setConfirmDelete(row)}
-                        disabled={deleting === row.id}
-                        title="Delete"
+                        className="btn btn-ghost btn-icon text-red-400 disabled:opacity-30 disabled:cursor-not-allowed"
+                        onClick={() => canDelete(row) && setConfirmDelete(row)}
+                        disabled={!canDelete(row) || deleting === row.id}
+                        title={deleteTooltip(row)}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
@@ -174,44 +193,33 @@ function ContractTable({
         </div>
       </div>
 
-      {/* Edit/Add Modal */}
+      {/* Add/Edit Modal */}
       {modal.open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setModal({ open: false, row: null })} />
           <div className="relative glass-strong rounded-2xl p-6 w-full max-w-md space-y-4 animate-in">
             <h2 className="text-base font-semibold text-default">
-              {modal.row ? `Edit ${type}` : `Add ${type}`}
+              {modal.row ? 'Edit Workspace' : 'Add Workspace'}
             </h2>
             <div className="space-y-3">
               <div>
-                <label className="block text-xs text-muted mb-1">Name</label>
+                <label className="block text-xs text-muted mb-1">Name <span className="text-red-400">*</span></label>
                 <input
                   className="input"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. ICC-YANGYUEN"
+                  placeholder="e.g. Marketing"
+                  disabled={modal.row?.name === 'SYSTEM'}
                 />
               </div>
               <div>
-                <label className="block text-xs text-muted mb-1">Contract Address</label>
+                <label className="block text-xs text-muted mb-1">Description</label>
                 <input
-                  className="input font-mono text-xs"
-                  value={form.address}
-                  onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
-                  placeholder="0x..."
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-muted mb-1">Workspace</label>
-                <select
                   className="input"
-                  value={form.workspaceId}
-                  onChange={(e) => setForm((f) => ({ ...f, workspaceId: e.target.value }))}
-                >
-                  {workspaces.map((ws) => (
-                    <option key={ws.id} value={String(ws.id)}>{ws.name}</option>
-                  ))}
-                </select>
+                  value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="Optional description"
+                />
               </div>
               {error && <p className="text-xs text-red-400">{error}</p>}
             </div>
@@ -244,42 +252,6 @@ function ContractTable({
             </div>
           </div>
         </div>
-      )}
-    </>
-  )
-}
-
-export default function ContractsPage() {
-  const [tab, setTab] = useState<'token' | 'address'>('token')
-
-  return (
-    <div className="p-6 space-y-6 animate-in">
-      <div>
-        <h1 className="text-xl font-semibold text-default">Contracts</h1>
-        <p className="text-sm text-muted mt-0.5">Manage token and address contract records</p>
-      </div>
-
-      {/* Tabs */}
-      <div className="seg w-fit">
-        <button className={tab === 'token' ? 'active' : ''} onClick={() => setTab('token')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
-          </svg>
-          Token Contracts
-        </button>
-        <button className={tab === 'address' ? 'active' : ''} onClick={() => setTab('address')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" />
-          </svg>
-          Address Contracts
-        </button>
-      </div>
-
-      {tab === 'token' && (
-        <ContractTable type="Token Contract" endpoint="/api/contracts/token" />
-      )}
-      {tab === 'address' && (
-        <ContractTable type="Address Contract" endpoint="/api/contracts/address" />
       )}
     </div>
   )

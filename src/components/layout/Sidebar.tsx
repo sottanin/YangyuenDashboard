@@ -3,11 +3,18 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Icon } from '@/components/ui/Icon'
+import { useWorkspace } from '@/lib/WorkspaceContext'
 
 type SidebarState = 'open' | 'narrow' | 'closed'
 
 interface SidebarProps {
   state: SidebarState
+  admin: {
+    name: string
+    email: string | null
+    username: string
+    role: string
+  }
 }
 
 const NAV = [
@@ -33,13 +40,16 @@ const NAV = [
     items: [
       { id: 'batch-logs', label: 'Batch Logs', icon: 'refresh', href: '/dashboard/batch-logs', badge: 'Job' },
       { id: 'contracts',  label: 'Contracts',  icon: 'doc',     href: '/dashboard/contracts' },
+      { id: 'workspaces', label: 'Workspaces', icon: 'target',  href: '/dashboard/workspaces' },
+      { id: 'admin-users', label: 'Admin Users', icon: 'users', href: '/dashboard/admin-users' },
       { id: 'settings',   label: 'Settings',   icon: 'gear',    href: '/dashboard/settings' },
     ],
   },
 ]
 
-export function Sidebar({ state }: SidebarProps) {
+export function Sidebar({ state, admin }: SidebarProps) {
   const pathname = usePathname()
+  const { selected } = useWorkspace()
   const isNarrow = state === 'narrow'
   if (state === 'closed') return null
 
@@ -47,6 +57,9 @@ export function Sidebar({ state }: SidebarProps) {
     if (href === '/dashboard') return pathname === '/dashboard'
     return pathname.startsWith(href)
   }
+
+  const wsLabel = selected.id === 'all' ? 'All Workspaces' : selected.name
+  const wsInitials = selected.id === 'all' ? '∞' : selected.name.slice(0, 2).toUpperCase()
 
   return (
     <aside
@@ -57,22 +70,13 @@ export function Sidebar({ state }: SidebarProps) {
       <div className="h-full glass-strong border-r border-default flex flex-col p-3">
         {/* Logo */}
         <div className={`flex items-center gap-2.5 px-2 py-3 mb-2 ${isNarrow ? 'justify-center' : ''}`}>
-          <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{
-              background: 'linear-gradient(135deg, rgb(var(--accent)), rgb(var(--accent-3)))',
-              boxShadow: '0 4px 12px rgb(var(--accent) / 0.4)',
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 4l8 4 8-4v12l-8 4-8-4V4z"/>
-              <path d="M4 4l8 4 8-4M12 8v12"/>
-            </svg>
+          <div className="w-8 h-8 flex-shrink-0">
+            <img src="/logo-fullcolor.svg" alt="Yangyuen" className="w-full h-full object-contain" />
           </div>
           {!isNarrow && (
             <div>
-              <div className="text-[15px] font-semibold tracking-tight text-default leading-none">Yangyuen</div>
-              <div className="text-[10px] text-muted mt-0.5">Admin Workspace</div>
+              <div className="text-[13px] font-semibold tracking-tight text-default leading-none">Yangyuen</div>
+              <div className="text-[10px] text-muted mt-0.5">Data Analysis</div>
             </div>
           )}
         </div>
@@ -84,11 +88,11 @@ export function Sidebar({ state }: SidebarProps) {
               className="w-6 h-6 rounded flex items-center justify-center text-[10px] font-semibold text-white flex-shrink-0"
               style={{ background: 'linear-gradient(135deg, rgb(var(--accent-2)), rgb(var(--accent-3)))' }}
             >
-              YY
+              {wsInitials}
             </div>
             <div className="flex-1 text-left min-w-0">
               <div className="text-xs font-medium text-default truncate">Yangyuen</div>
-              <div className="text-[10px] text-faint truncate">Blockchain Loyalty</div>
+              <div className="text-[10px] text-faint truncate">{wsLabel}</div>
             </div>
             <Icon name="chevD" size={12} className="text-faint flex-shrink-0" />
           </div>
@@ -124,11 +128,13 @@ export function Sidebar({ state }: SidebarProps) {
         {/* Footer */}
         <div className="border-t border-default pt-3 mt-2">
           <div className={`flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-surface-2 cursor-pointer ${isNarrow ? 'justify-center' : ''}`}>
-            <div className="avatar" style={{ width: 30, height: 30, fontSize: '10px' }}>AD</div>
+            <div className="avatar" style={{ width: 30, height: 30, fontSize: '10px' }}>
+              {admin.name.slice(0, 2).toUpperCase()}
+            </div>
             {!isNarrow && (
               <div className="flex-1 min-w-0 sidebar-footer-label">
-                <div className="text-xs font-medium text-default truncate">Admin</div>
-                <div className="text-[10px] text-faint truncate">admin@yangyuen.io</div>
+                <div className="text-xs font-medium text-default truncate">{admin.name}</div>
+                <div className="text-[10px] text-faint truncate">{admin.email || admin.username}</div>
               </div>
             )}
             {!isNarrow && <Icon name="chevR" size={12} className="text-faint sidebar-footer-label" />}

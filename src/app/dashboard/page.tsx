@@ -2,81 +2,10 @@ import { Suspense } from 'react'
 import { prisma } from '@/lib/prisma'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
-import { KpiTile } from '@/components/ui/KpiTile'
 import { SkeletonKpi, SkeletonCard } from '@/components/ui/SkeletonCard'
 import { OverviewCharts } from './OverviewCharts'
+import { OverviewKpis } from './OverviewKpis'
 import { RecentTransactionsTable } from './RecentTransactionsTable'
-
-async function OverviewKpis() {
-  let totalTx = 0
-  let activeWallets = 0
-  let totalRedemptions = 0
-  let mintCount = 0
-
-  try {
-    const [txCount, walletCount, redemptionCount, mintCountResult] = await Promise.all([
-      prisma.transactionDetail.count(),
-      prisma.wallet.count(),
-      prisma.redemptionTransactionDetail.count(),
-      prisma.transactionDetail.count({ where: { txType: 'token_minting' } }),
-    ])
-    totalTx = txCount
-    activeWallets = walletCount
-    totalRedemptions = redemptionCount
-    mintCount = mintCountResult
-  } catch {
-    // DB not ready — show zeros
-  }
-
-  const kpis = [
-    {
-      label: 'Total Transactions',
-      value: totalTx.toLocaleString(),
-      change: 8.4,
-      spark: [40, 45, 42, 50, 48, 55, 60, 58, 62, 65, 68, 72],
-      icon: 'pulse',
-      iconBg: 'rgb(99 102 241 / 0.12)',
-      sparkColor: 'var(--accent)',
-    },
-    {
-      label: 'Active Wallets',
-      value: activeWallets.toLocaleString(),
-      change: 3.2,
-      spark: [20, 22, 24, 23, 25, 26, 28, 27, 29, 30, 31, 32],
-      icon: 'users',
-      iconBg: 'rgb(6 182 212 / 0.12)',
-      sparkColor: 'var(--accent-3)',
-    },
-    {
-      label: 'Token Transfers',
-      value: (totalTx - mintCount).toLocaleString(),
-      change: 5.1,
-      spark: [30, 32, 35, 33, 36, 38, 40, 39, 42, 44, 46, 48],
-      icon: 'box',
-      iconBg: 'rgb(139 92 246 / 0.12)',
-      sparkColor: 'var(--accent-2)',
-    },
-    {
-      label: 'Total Redemptions',
-      value: totalRedemptions.toLocaleString(),
-      change: 12.8,
-      spark: [5, 6, 5, 7, 8, 9, 8, 10, 11, 12, 13, 14],
-      icon: 'cart',
-      iconBg: 'rgb(244 63 94 / 0.12)',
-      sparkColor: 'var(--danger)',
-    },
-  ]
-
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-      {kpis.map((k, i) => (
-        <div key={i} className="animate-in" style={{ animationDelay: `${i * 60}ms` }}>
-          <KpiTile {...k} />
-        </div>
-      ))}
-    </div>
-  )
-}
 
 async function RecentTransactions() {
   let transactions: {
@@ -137,7 +66,7 @@ export default function DashboardPage() {
     <>
       <PageHeader
         title="Overview"
-        subtitle="Yangyuen blockchain loyalty token activity dashboard"
+        subtitle="Yangyuen blockchain data analysis dashboard"
         actions={
           <div className="flex items-center gap-2">
             <span className="pill pill-success"><span className="live-dot" />Live</span>
@@ -145,13 +74,7 @@ export default function DashboardPage() {
         }
       />
 
-      <Suspense fallback={
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-          {[0, 1, 2, 3].map((i) => <SkeletonKpi key={i} />)}
-        </div>
-      }>
-        <OverviewKpis />
-      </Suspense>
+      <OverviewKpis />
 
       <Suspense fallback={
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">

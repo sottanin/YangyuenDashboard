@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useWorkspace } from '@/lib/WorkspaceContext'
 import { Card } from '@/components/ui/Card'
 import { AreaChart } from '@/components/charts/AreaChart'
 import { BarChart } from '@/components/charts/BarChart'
@@ -34,13 +35,16 @@ const FUNNEL_DATA = [
 ]
 
 export function OverviewCharts() {
+  const { selected } = useWorkspace()
   const [volumeData, setVolumeData] = useState<VolumeData[]>([])
   const [tokenDist, setTokenDist] = useState<{ label: string; value: number; color: string }[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    const wsParam = selected.id === 'all' ? '' : `?workspace=${selected.id}`
+    setLoading(true)
     Promise.all([
-      fetch('/api/charts/volume').then((r) => r.json()),
+      fetch(`/api/charts/volume${wsParam}`).then((r) => r.json()),
       fetch('/api/tokens').then((r) => r.json()),
     ]).then(([volRes, tokRes]) => {
       if (volRes.volume) setVolumeData(volRes.volume)
@@ -67,7 +71,7 @@ export function OverviewCharts() {
         { label: 'Jun', mint: 220, transfer: 560, total: 780 },
       ])
     }).finally(() => setLoading(false))
-  }, [])
+  }, [selected])
 
   if (loading) return (
     <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">

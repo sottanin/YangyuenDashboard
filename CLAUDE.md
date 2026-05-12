@@ -86,6 +86,16 @@ All routes are in `src/app/api/` and return JSON. Parallel Prisma queries use `P
 ### Prisma Client
 `src/lib/prisma.ts` uses the `PrismaPg` driver adapter (required for Prisma 7). The singleton pattern prevents connection pool exhaustion during hot-reload. The `prisma.config.ts` in the project root configures seed path for Prisma 7's CLI.
 
+## Production Deployment
+
+**Deploy only when explicitly instructed — never deploy automatically.**
+
+- App runs on port **3001**
+- PostgreSQL runs on port **5433**
+- Target: DigitalOcean Droplet named **`yangyuen`**
+- DO NOT run `npm run dev` or start local servers as a substitute for deployment
+- API key is stored in `.env.local` (not committed) — never hardcode credentials in source files
+
 ## Agent Pipeline
 
 Claude agent profiles are under `.claude/agents`. Read a profile only when a task needs that role or the user asks for it. Do not load all profiles automatically.

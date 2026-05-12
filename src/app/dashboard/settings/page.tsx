@@ -9,6 +9,8 @@ const TABS = ['Profile', 'Workspace', 'Batch Job', 'API Keys', 'Security', 'Appe
 
 const CUTOFF_OPTIONS = [
   { value: '7', label: '7 Days', description: 'Fetch transactions from the last 7 days' },
+  { value: '30', label: '30 Days', description: 'Fetch transactions from the last 30 days' },
+  { value: 'all', label: 'All-time', description: 'Fetch all available transaction history' },
 ]
 
 function BatchJobSettings() {
