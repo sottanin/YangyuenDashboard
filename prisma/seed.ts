@@ -262,7 +262,7 @@ async function main() {
           tokenAddress: parseStr(row['items.token.address']) || 'unknown',
           tokenName: tokenName || 'unknown',
           tokenSymbol: parseStr(row['items.token.symbol']) || tokenName || '',
-          tokenType: parseStr(row['items.token.type']) || 'ERC-721',
+          tokenType: parseStr(row['items.token.type']) || 'KAP-721',
           tokenId: parseStr(row['total.token_id']) || null,
         },
         update: {},
@@ -282,15 +282,17 @@ async function main() {
     for (const inst of instances) {
       const id = parseStr(inst['id'])
       if (!id) continue
+      const tokenAddress = parseStr(inst['token.address']) || 'unknown'
       await prisma.nFTInstance.upsert({
-        where: { id },
+        where: { normalizedTokenAddress_id: { normalizedTokenAddress: tokenAddress.toLowerCase(), id } },
         create: {
           id,
           isUnique: Boolean(inst['is_unique']),
           imageUrl: parseStr(inst['metadata.image']) || null,
           name: parseStr(inst['metadata.name']) || 'Unknown NFT',
           ownerHash: parseStr(inst['owner.hash']) || 'unknown',
-          tokenAddress: parseStr(inst['token.address']) || 'unknown',
+          tokenAddress,
+          normalizedTokenAddress: tokenAddress.toLowerCase(),
           tokenValue: parseStr(inst['token.value']) || null,
           visible: inst['visible'] !== false && inst['visible'] !== 0 && inst['visible'] !== 'false',
         },
@@ -366,8 +368,8 @@ async function main() {
     businessHistoryStart: '2025-10-29T14:02:37+07:00',
     defaultReportRangeDays: '30',
     aggregateMarketplaceVersions: 'true',
-    redemptionNftContract: '0xe089bc4b774b03f1D5F8C3f624603643F0718B62',
     batchCutoffDays: '7',
+    batchScheduleEnabled: 'false',
   }
   for (const [key, value] of Object.entries(configDefaults)) {
     await prisma.systemConfig.upsert({ where: { key }, create: { key, value }, update: {} })

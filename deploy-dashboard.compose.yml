@@ -30,6 +30,7 @@ services:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       TOKEN_IMAGE_DIR: /app/data/token-images
+      BATCH_SCHEDULER_SECRET: ${BATCH_SCHEDULER_SECRET:?BATCH_SCHEDULER_SECRET is required}
     volumes:
       - token_images:/app/data/token-images
     expose:
@@ -47,6 +48,25 @@ services:
       caddy_proxy:
         aliases:
           - yangyuen-dashboard-app
+
+  scheduler:
+    image: alpine:3.20
+    restart: unless-stopped
+    environment:
+      BATCH_SCHEDULER_SECRET: ${BATCH_SCHEDULER_SECRET:?BATCH_SCHEDULER_SECRET is required}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        printf '%s\n' '#!/bin/sh' "exec wget -qO- --post-data=\"\" --header=\"Authorization: Bearer \$$BATCH_SCHEDULER_SECRET\" http://app:3000/api/internal/batch-schedule/run" > /usr/local/bin/run-batch-schedule
+        chmod 700 /usr/local/bin/run-batch-schedule
+        echo '0 * * * * /usr/local/bin/run-batch-schedule' > /etc/crontabs/root
+        exec crond -f -l 2
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - dashboard_internal
 
   migrate:
     image: node:22-alpine

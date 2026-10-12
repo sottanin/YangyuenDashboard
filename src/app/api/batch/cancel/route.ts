@@ -7,9 +7,14 @@ export async function POST() {
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!canAccessMenu(admin, 'batch-logs')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const result = await prisma.batchJobLog.updateMany({
-    where: { status: 'running' },
+  const requestedAt = new Date()
+  const coordinators = await prisma.batchJobLog.updateMany({
+    where: { status: 'running', tokenName: { in: ['ManualBatchPipeline', 'ScheduledBatchPipeline'] } },
+    data: { stoppedReason: 'cancellation_requested', error: 'Manual cancellation requested' },
+  })
+  const workers = await prisma.batchJobLog.updateMany({
+    where: { status: 'running', tokenName: { notIn: ['ManualBatchPipeline', 'ScheduledBatchPipeline'] } },
     data: { status: 'failed', finishedAt: new Date(), error: 'Manually cancelled' },
   })
-  return NextResponse.json({ cancelled: result.count })
+  return NextResponse.json({ cancellationRequested: coordinators.count, cancelledWorkers: workers.count, requestedAt })
 }

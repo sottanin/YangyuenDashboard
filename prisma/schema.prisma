@@ -115,14 +115,18 @@ model BatchJobLog {
 }
 
 model NFTInstance {
-  id           String   @id
-  isUnique     Boolean  @default(false)
-  imageUrl     String?
-  name         String
-  ownerHash    String
-  tokenAddress String
-  tokenValue   Decimal?
-  visible      Boolean  @default(true)
+  id                     String
+  isUnique               Boolean  @default(false)
+  imageUrl               String?
+  name                   String
+  ownerHash              String
+  tokenAddress           String
+  normalizedTokenAddress String
+  tokenValue             Decimal?
+  visible                Boolean  @default(true)
+
+  @@id([normalizedTokenAddress, id])
+  @@index([tokenAddress])
 }
 
 model Wallet {

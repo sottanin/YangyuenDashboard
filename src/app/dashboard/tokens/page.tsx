@@ -56,10 +56,24 @@ function trunc(s: string, n = 16) {
   return s.slice(0, 8) + '...' + s.slice(-6)
 }
 
+const TRUSTED_NFT_IMAGE_HOSTS = new Set(['ipfs.io', 'gateway.pinata.cloud', 'cloudflare-ipfs.com'])
+
+function safeNftImageUrl(rawUrl: string | null): string | null {
+  if (!rawUrl) return null
+  const candidate = rawUrl.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${rawUrl.slice(7)}` : rawUrl
+  try {
+    const url = new URL(candidate)
+    return url.protocol === 'https:' && TRUSTED_NFT_IMAGE_HOSTS.has(url.hostname.toLowerCase()) ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
 function NftImage({ nft }: { nft: NFTInstance }) {
   const [failed, setFailed] = useState(false)
+  const imageUrl = safeNftImageUrl(nft.imageUrl)
 
-  if (!nft.imageUrl || failed) {
+  if (!imageUrl || failed) {
     return (
       <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted" role="img" aria-label={`${nft.name} image unavailable`}>
         <span className="text-4xl" aria-hidden="true">🍱</span>
@@ -70,7 +84,7 @@ function NftImage({ nft }: { nft: NFTInstance }) {
 
   return (
     <Image
-      src={nft.imageUrl.replace('ipfs://', 'https://ipfs.io/ipfs/')}
+      src={imageUrl}
       alt={nft.name}
       fill
       unoptimized
@@ -112,15 +126,15 @@ export default function TokensPage() {
     <>
       <PageHeader
         title="Tokens"
-        subtitle="ERC-20 loyalty tokens and ERC-721 NFT redemption instances"
+        subtitle="KAP-20/KAP-22 loyalty tokens and KAP-721 redemption instances"
         actions={
           <button className="btn btn-ghost"><Icon name="refresh" size={14} />Refresh</button>
         }
       />
 
-      {/* ERC-20 Token Cards */}
+      {/* KAP-20/KAP-22 Token Cards */}
       <div className="mb-2">
-        <div className="text-xs font-medium text-muted uppercase tracking-wider mb-3">ERC-20 Tokens</div>
+        <div className="text-xs font-medium text-muted uppercase tracking-wider mb-3">KAP-20 / KAP-22 Tokens</div>
       </div>
 
       {loading ? (
@@ -167,7 +181,7 @@ export default function TokensPage() {
       {/* NFT Section */}
       <div className="mb-2">
         <div className="text-xs font-medium text-muted uppercase tracking-wider mb-3">
-          ERC-721 NFT Instances
+          KAP-721 NFT Instances
         </div>
       </div>
 
@@ -186,7 +200,7 @@ export default function TokensPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {nftInstances.map((nft) => (
-            <div key={nft.id} className="glass rounded-2xl overflow-hidden">
+            <div key={`${nft.tokenAddress}:${nft.id}`} className="glass rounded-2xl overflow-hidden">
               <div
                 className="relative w-full h-32 flex items-center justify-center"
                 style={{ background: 'rgb(var(--surface-2))' }}

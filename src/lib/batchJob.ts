@@ -4,12 +4,32 @@ import { isValidAddress, normalizeAddress, TOKEN_ADDRESSES } from './system/addr
 
 const KUBSCAN_BASE = 'https://www.kubscan.com/api/v2/tokens'
 const KUBSCAN_ADDR = 'https://www.kubscan.com/api/v2/addresses'
-const NFT_CONTRACT = '0xe089bc4b774b03f1D5F8C3f624603643F0718B62'
+
+type RegistryToken = {
+  address: string
+  name: string
+  symbol: string | null
+  standard: string | null
+}
 
 function cutoffDate(days: number): Date {
   const d = new Date()
   d.setDate(d.getDate() - days)
   return d
+}
+
+async function assertPipelineActive(coordinatorId?: string): Promise<void> {
+  if (!coordinatorId) return
+  const coordinator = await prisma.batchJobLog.findUnique({ where: { id: coordinatorId }, select: { status: true, stoppedReason: true } })
+  if (coordinator?.status !== 'running' || coordinator.stoppedReason === 'cancellation_requested') throw new Error('Batch pipeline was cancelled')
+}
+
+async function assertJobRunning(logId: string, coordinatorId?: string): Promise<void> {
+  const [log] = await Promise.all([
+    prisma.batchJobLog.findUnique({ where: { id: logId }, select: { status: true } }),
+    assertPipelineActive(coordinatorId),
+  ])
+  if (log?.status !== 'running') throw new Error('Batch job was cancelled')
 }
 
 // Convert raw blockchain wei value to Decimal using BigInt string manipulation (avoids float precision loss)
@@ -70,7 +90,7 @@ function extractOriginalPrice(attrs?: NFTAttribute[]): Prisma.Decimal | null {
   return fromWei(trait.value)
 }
 
-export async function runBatchJob(): Promise<void> {
+export async function runBatchJob(coordinatorId?: string): Promise<void> {
   const config = await prisma.systemConfig.findUnique({ where: { key: 'batchCutoffDays' } })
   const configValue = config?.value ?? '7'
   let cutoff: Date | null = null
@@ -82,9 +102,13 @@ export async function runBatchJob(): Promise<void> {
     cutoff = cutoffDate(cutoffDays)
   }
 
-  const tokens = await prisma.tokenContract.findMany()
+  const tokens = await prisma.tokenContract.findMany({
+    where: { active: true, standard: { in: ['KAP-20', 'KAP-22'] } },
+    orderBy: [{ standard: 'asc' }, { name: 'asc' }],
+  })
 
   for (const token of tokens) {
+    await assertPipelineActive(coordinatorId)
     const log = await prisma.batchJobLog.create({
       data: {
         status: 'running',
@@ -103,6 +127,7 @@ export async function runBatchJob(): Promise<void> {
 
     try {
       while (!done) {
+        await assertJobRunning(log.id, coordinatorId)
         const res = await fetch(url)
         if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
         const data: KubScanResponse = await res.json()
@@ -112,6 +137,7 @@ export async function runBatchJob(): Promise<void> {
         totalFetched += items.length
 
         for (const item of items) {
+          await assertJobRunning(log.id, coordinatorId)
           const ts = new Date(item.timestamp)
 
           // Stop if older than cutoff (only when cutoff is set)
@@ -123,6 +149,9 @@ export async function runBatchJob(): Promise<void> {
 
           const key = `${item.log_index}_${item.tx_hash}`
           const txId = item.tx_hash
+          if (item.token?.address && normalizeAddress(item.token.address) !== normalizeAddress(token.address)) {
+            throw new Error(`KubScan returned a different token contract for ${token.address}`)
+          }
 
           // Upsert TransactionHeader (create if not exists, skip update to preserve fee data)
           await prisma.transactionHeader.upsert({
@@ -148,10 +177,10 @@ export async function runBatchJob(): Promise<void> {
             toHash: item.to?.hash || 'unknown',
             method: item.method || 'unknown',
             timestamp: ts,
-            tokenAddress: item.token?.address || token.address,
+            tokenAddress: token.address,
             tokenName: item.token?.name || token.name,
-            tokenSymbol: item.token?.symbol || '',
-            tokenType: item.token?.type || 'ERC-20',
+            tokenSymbol: item.token?.symbol || token.symbol || '',
+            tokenType: token.standard || 'KAP-20',
             decimals: item.total?.decimals ? parseInt(item.total.decimals, 10) : null,
             value: fromWei(item.total?.value, item.total?.decimals ? parseInt(item.total.decimals, 10) : 18),
             txType: item.type || 'token_transfer',
@@ -174,8 +203,8 @@ export async function runBatchJob(): Promise<void> {
         }
       }
 
-      await prisma.batchJobLog.update({
-        where: { id: log.id },
+      const completed = await prisma.batchJobLog.updateMany({
+        where: { id: log.id, status: 'running' },
         data: {
           finishedAt: new Date(),
           status: 'completed',
@@ -186,9 +215,10 @@ export async function runBatchJob(): Promise<void> {
           stoppedReason,
         },
       })
+      if (completed.count === 0) throw new Error('Batch job was cancelled')
     } catch (err) {
-      await prisma.batchJobLog.update({
-        where: { id: log.id },
+      await prisma.batchJobLog.updateMany({
+        where: { id: log.id, status: 'running' },
         data: {
           finishedAt: new Date(),
           status: 'failed',
@@ -199,6 +229,7 @@ export async function runBatchJob(): Promise<void> {
           error: err instanceof Error ? err.message : String(err),
         },
       })
+      throw err
     }
   }
 }
@@ -305,7 +336,8 @@ async function createWalletSyncLog(): Promise<{ id: string } | null> {
   })
 }
 
-export async function runWalletSyncJob(): Promise<void> {
+export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
+  await assertPipelineActive(coordinatorId)
   const log = await createWalletSyncLog()
   if (!log) {
     console.warn('[WalletSync] Skipped because another wallet sync is already running')
@@ -378,6 +410,7 @@ export async function runWalletSyncJob(): Promise<void> {
       if (currentLog?.status !== 'running') {
         throw new Error('Wallet sync was cancelled')
       }
+      await assertPipelineActive(coordinatorId)
 
       try {
         if (!isValidAddress(wallet.walletId)) {
@@ -415,6 +448,7 @@ export async function runWalletSyncJob(): Promise<void> {
       throw new Error(`Wallet snapshot aborted because ${errorCount} balance request(s) failed`)
     }
 
+    await assertPipelineActive(coordinatorId)
     await prisma.$transaction(async (tx) => {
       // Serialize the final commit with another start/check and honor manual cancellation.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(93422001)`
@@ -425,6 +459,7 @@ export async function runWalletSyncJob(): Promise<void> {
       if (currentLog?.status !== 'running') {
         throw new Error('Wallet sync was cancelled before balances were committed')
       }
+      await assertPipelineActive(coordinatorId)
 
       // Every snapshot already starts with all canonical balances at zero. Apply
       // those complete snapshots only to the wallets that were fetched by this
@@ -467,24 +502,28 @@ export async function runWalletSyncJob(): Promise<void> {
         error: err instanceof Error ? err.message : String(err),
       },
     })
+    throw err
   }
 }
 
-async function upsertNFTInstance(tokenId: string): Promise<void> {
+async function upsertNFTInstance(contract: RegistryToken, tokenId: string): Promise<void> {
   try {
-    const res = await fetch(`${KUBSCAN_BASE}/${NFT_CONTRACT}/instances/${tokenId}`)
+    const res = await fetch(`${KUBSCAN_BASE}/${contract.address}/instances/${tokenId}`)
     if (!res.ok) return
     const data: NFTInstanceResponse = await res.json()
+    if (data.token?.address && normalizeAddress(data.token.address) !== normalizeAddress(contract.address)) return
     const tokenValue = extractOriginalPrice(data.metadata?.attributes)
+    const normalizedTokenAddress = normalizeAddress(contract.address)
     await prisma.nFTInstance.upsert({
-      where: { id: tokenId },
+      where: { normalizedTokenAddress_id: { normalizedTokenAddress, id: tokenId } },
       create: {
         id: tokenId,
         isUnique: data.is_unique ?? false,
         imageUrl: data.metadata?.image ?? null,
         name: data.metadata?.name || 'Unknown NFT',
         ownerHash: data.owner?.hash || 'unknown',
-        tokenAddress: data.token?.address || NFT_CONTRACT,
+        tokenAddress: contract.address,
+        normalizedTokenAddress,
         tokenValue: tokenValue ?? null,
         visible: true,
       },
@@ -493,7 +532,6 @@ async function upsertNFTInstance(tokenId: string): Promise<void> {
         imageUrl: data.metadata?.image ?? null,
         name: data.metadata?.name || 'Unknown NFT',
         ownerHash: data.owner?.hash || 'unknown',
-        tokenAddress: data.token?.address || NFT_CONTRACT,
         tokenValue: tokenValue ?? null,
       },
     })
@@ -502,7 +540,8 @@ async function upsertNFTInstance(tokenId: string): Promise<void> {
   }
 }
 
-export async function runRedemptionBatchJob(): Promise<void> {
+export async function runRedemptionBatchJob(coordinatorId?: string): Promise<void> {
+  await assertPipelineActive(coordinatorId)
   const config = await prisma.systemConfig.findUnique({ where: { key: 'batchCutoffDays' } })
   const configValue = config?.value ?? '7'
   let cutoff: Date | null = null
@@ -512,15 +551,28 @@ export async function runRedemptionBatchJob(): Promise<void> {
     cutoff = cutoffDate(cutoffDays)
   }
 
-  const log = await prisma.batchJobLog.create({
-    data: {
-      status: 'running',
-      tokenName: 'NFT Redemption',
-      tokenAddress: NFT_CONTRACT,
-    },
+  const contracts = await prisma.tokenContract.findMany({
+    where: { active: true, standard: 'KAP-721' },
+    orderBy: { name: 'asc' },
+    select: { address: true, name: true, symbol: true, standard: true },
   })
 
-  let url = `${KUBSCAN_BASE}/${NFT_CONTRACT}/transfers`
+  for (const contract of contracts) {
+    await syncRedemptionContract(contract, cutoff, coordinatorId)
+  }
+}
+
+async function syncRedemptionContract(
+  contract: RegistryToken,
+  cutoff: Date | null,
+  coordinatorId?: string,
+): Promise<void> {
+  await assertPipelineActive(coordinatorId)
+  const log = await prisma.batchJobLog.create({
+    data: { status: 'running', tokenName: contract.name, tokenAddress: contract.address },
+  })
+
+  let url = `${KUBSCAN_BASE}/${contract.address}/transfers`
   let totalFetched = 0
   let totalInserted = 0
   let totalUpdated = 0
@@ -530,6 +582,7 @@ export async function runRedemptionBatchJob(): Promise<void> {
 
   try {
     while (!done) {
+      await assertJobRunning(log.id, coordinatorId)
       const res = await fetch(url)
       if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
       const data: KubScanResponse = await res.json()
@@ -539,6 +592,7 @@ export async function runRedemptionBatchJob(): Promise<void> {
       totalFetched += items.length
 
       for (const item of items) {
+        await assertJobRunning(log.id, coordinatorId)
         const ts = new Date(item.timestamp)
 
         if (cutoff !== null && ts < cutoff) {
@@ -549,6 +603,9 @@ export async function runRedemptionBatchJob(): Promise<void> {
 
         const key = `${item.log_index}_${item.tx_hash}`
         const txId = item.tx_hash
+        if (item.token?.address && normalizeAddress(item.token.address) !== normalizeAddress(contract.address)) {
+          throw new Error(`KubScan returned a different NFT contract for ${contract.address}`)
+        }
 
         await prisma.redemptionTransactionHeader.upsert({
           where: { txId },
@@ -570,10 +627,10 @@ export async function runRedemptionBatchJob(): Promise<void> {
           toHash: item.to?.hash || 'unknown',
           method: item.method || 'unknown',
           timestamp: ts,
-          tokenAddress: item.token?.address || NFT_CONTRACT,
-          tokenName: item.token?.name || 'Unknown NFT',
-          tokenSymbol: item.token?.symbol || '',
-          tokenType: item.token?.type || 'ERC-721',
+          tokenAddress: contract.address,
+          tokenName: item.token?.name || contract.name,
+          tokenSymbol: item.token?.symbol || contract.symbol || '',
+          tokenType: contract.standard || 'KAP-721',
           tokenId: item.total?.token_id || null,
         }
 
@@ -587,20 +644,20 @@ export async function runRedemptionBatchJob(): Promise<void> {
         }
 
         if (item.total?.token_id) {
-          await upsertNFTInstance(item.total.token_id)
+          await upsertNFTInstance(contract, item.total.token_id)
         }
       }
 
       if (!done && data.next_page_params) {
         const { block_number, index } = data.next_page_params
-        url = `${KUBSCAN_BASE}/${NFT_CONTRACT}/transfers?block_number=${block_number}&index=${index}`
+        url = `${KUBSCAN_BASE}/${contract.address}/transfers?block_number=${block_number}&index=${index}`
       } else {
         done = true
       }
     }
 
-    await prisma.batchJobLog.update({
-      where: { id: log.id },
+    const completed = await prisma.batchJobLog.updateMany({
+      where: { id: log.id, status: 'running' },
       data: {
         finishedAt: new Date(),
         status: 'completed',
@@ -611,9 +668,10 @@ export async function runRedemptionBatchJob(): Promise<void> {
         stoppedReason,
       },
     })
+    if (completed.count === 0) throw new Error('Batch job was cancelled')
   } catch (err) {
-    await prisma.batchJobLog.update({
-      where: { id: log.id },
+    await prisma.batchJobLog.updateMany({
+      where: { id: log.id, status: 'running' },
       data: {
         finishedAt: new Date(),
         status: 'failed',
@@ -624,13 +682,15 @@ export async function runRedemptionBatchJob(): Promise<void> {
         error: err instanceof Error ? err.message : String(err),
       },
     })
+    throw err
   }
 }
 
 const KUBSCAN_TX = 'https://www.kubscan.com/api/v2/transactions'
 const FEE_BATCH_SIZE = 10
 
-export async function runFeeUpdateJob(): Promise<void> {
+export async function runFeeUpdateJob(coordinatorId?: string): Promise<void> {
+  await assertPipelineActive(coordinatorId)
   const log = await prisma.batchJobLog.create({
     data: { status: 'running', tokenName: 'FeeUpdate', tokenAddress: 'all' },
   })
@@ -649,6 +709,7 @@ export async function runFeeUpdateJob(): Promise<void> {
     console.log(`[FeeUpdate] ${txHeaders.length} TX headers, ${rTxHeaders.length} Redemption headers with fee=0`)
 
     for (let i = 0; i < txHeaders.length; i += FEE_BATCH_SIZE) {
+      await assertJobRunning(log.id, coordinatorId)
       const batch = txHeaders.slice(i, i + FEE_BATCH_SIZE)
       await Promise.all(
         batch.map(async ({ txId }) => {
@@ -678,6 +739,7 @@ export async function runFeeUpdateJob(): Promise<void> {
     }
 
     for (let i = 0; i < rTxHeaders.length; i += FEE_BATCH_SIZE) {
+      await assertJobRunning(log.id, coordinatorId)
       const batch = rTxHeaders.slice(i, i + FEE_BATCH_SIZE)
       await Promise.all(
         batch.map(async ({ txId }) => {
@@ -708,8 +770,8 @@ export async function runFeeUpdateJob(): Promise<void> {
 
     console.log(`[FeeUpdate] Done — fetched:${totalFetched} updated:${totalUpdated} errors:${errorCount}`)
 
-    await prisma.batchJobLog.update({
-      where: { id: log.id },
+    const completed = await prisma.batchJobLog.updateMany({
+      where: { id: log.id, status: 'running' },
       data: {
         finishedAt: new Date(),
         status: 'completed',
@@ -719,10 +781,11 @@ export async function runFeeUpdateJob(): Promise<void> {
         stoppedReason: 'fee_update_done',
       },
     })
+    if (completed.count === 0) throw new Error('Batch job was cancelled')
   } catch (err) {
     console.error('[FeeUpdate] Fatal error:', err)
-    await prisma.batchJobLog.update({
-      where: { id: log.id },
+    await prisma.batchJobLog.updateMany({
+      where: { id: log.id, status: 'running' },
       data: {
         finishedAt: new Date(),
         status: 'failed',
@@ -732,14 +795,16 @@ export async function runFeeUpdateJob(): Promise<void> {
         error: err instanceof Error ? err.message : String(err),
       },
     })
+    throw err
   }
 }
 
 const NFT_BATCH_SIZE = 10
 
-export async function runNFTInstanceUpdateJob(): Promise<void> {
+export async function runNFTInstanceUpdateJob(coordinatorId?: string): Promise<void> {
+  await assertPipelineActive(coordinatorId)
   const log = await prisma.batchJobLog.create({
-    data: { status: 'running', tokenName: 'NFTInstanceUpdate', tokenAddress: NFT_CONTRACT },
+    data: { status: 'running', tokenName: 'NFTInstanceUpdate', tokenAddress: 'registry:KAP-721' },
   })
 
   let totalFetched = 0
@@ -747,27 +812,38 @@ export async function runNFTInstanceUpdateJob(): Promise<void> {
   let errorCount = 0
 
   try {
-    const instances = await prisma.nFTInstance.findMany({ select: { id: true } })
+    const activeContracts = await prisma.tokenContract.findMany({
+      where: { active: true, standard: 'KAP-721' },
+      select: { normalizedAddress: true },
+    })
+    const instances = await prisma.nFTInstance.findMany({
+      where: { normalizedTokenAddress: { in: activeContracts.map((contract) => contract.normalizedAddress) } },
+      select: { id: true, tokenAddress: true, normalizedTokenAddress: true },
+    })
     totalFetched = instances.length
     console.log(`[NFTInstanceUpdate] Processing ${totalFetched} NFT instances`)
 
     for (let i = 0; i < instances.length; i += NFT_BATCH_SIZE) {
+      await assertJobRunning(log.id, coordinatorId)
       const batch = instances.slice(i, i + NFT_BATCH_SIZE)
       await Promise.all(
-        batch.map(async ({ id }) => {
+        batch.map(async ({ id, tokenAddress, normalizedTokenAddress }) => {
           try {
-            const res = await fetch(`${KUBSCAN_BASE}/${NFT_CONTRACT}/instances/${id}`)
+            if (!isValidAddress(tokenAddress)) throw new Error('Invalid NFT contract address')
+            const res = await fetch(`${KUBSCAN_BASE}/${tokenAddress}/instances/${id}`)
             if (!res.ok) return
             const data: NFTInstanceResponse = await res.json()
+            if (data.token?.address && normalizeAddress(data.token.address) !== normalizeAddress(tokenAddress)) {
+              throw new Error('KubScan returned a different NFT contract')
+            }
             const tokenValue = extractOriginalPrice(data.metadata?.attributes)
             await prisma.nFTInstance.update({
-              where: { id },
+              where: { normalizedTokenAddress_id: { normalizedTokenAddress, id } },
               data: {
                 isUnique: data.is_unique ?? false,
                 imageUrl: data.metadata?.image ?? null,
                 name: data.metadata?.name || 'Unknown NFT',
                 ownerHash: data.owner?.hash || 'unknown',
-                tokenAddress: data.token?.address || NFT_CONTRACT,
                 tokenValue: tokenValue ?? null,
               },
             })
@@ -781,8 +857,8 @@ export async function runNFTInstanceUpdateJob(): Promise<void> {
 
     console.log(`[NFTInstanceUpdate] Done — fetched:${totalFetched} updated:${totalUpdated} errors:${errorCount}`)
 
-    await prisma.batchJobLog.update({
-      where: { id: log.id },
+    const completed = await prisma.batchJobLog.updateMany({
+      where: { id: log.id, status: 'running' },
       data: {
         finishedAt: new Date(),
         status: 'completed',
@@ -792,10 +868,11 @@ export async function runNFTInstanceUpdateJob(): Promise<void> {
         stoppedReason: 'nft_instance_update_done',
       },
     })
+    if (completed.count === 0) throw new Error('Batch job was cancelled')
   } catch (err) {
     console.error('[NFTInstanceUpdate] Fatal error:', err)
-    await prisma.batchJobLog.update({
-      where: { id: log.id },
+    await prisma.batchJobLog.updateMany({
+      where: { id: log.id, status: 'running' },
       data: {
         finishedAt: new Date(),
         status: 'failed',
@@ -805,5 +882,6 @@ export async function runNFTInstanceUpdateJob(): Promise<void> {
         error: err instanceof Error ? err.message : String(err),
       },
     })
+    throw err
   }
 }

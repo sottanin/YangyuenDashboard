@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { SESSION_COOKIE, verifySessionToken } from '@/lib/auth/session'
 
 const PUBLIC_API_PREFIXES = ['/api/auth']
+const PUBLIC_API_PATHS = ['/api/internal/batch-schedule/run']
 const PROTECTED_PATHS = ['/dashboard', '/api']
 
 export async function middleware(request: NextRequest) {
@@ -11,7 +12,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  if (PUBLIC_API_PREFIXES.some((path) => pathname.startsWith(path))) {
+  if (PUBLIC_API_PATHS.includes(pathname) || PUBLIC_API_PREFIXES.some((path) => pathname.startsWith(path))) {
     return NextResponse.next()
   }
 

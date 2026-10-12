@@ -1,13 +1,12 @@
 import { prisma } from '@/lib/prisma'
-import { isValidAddress } from './addresses'
 
 export const CONFIG_DEFAULTS = {
   reportingTimezone: 'Asia/Bangkok',
   businessHistoryStart: '2025-10-29T14:02:37+07:00',
   defaultReportRangeDays: '30',
   aggregateMarketplaceVersions: 'true',
-  redemptionNftContract: '0xe089bc4b774b03f1D5F8C3f624603643F0718B62',
   batchCutoffDays: '7',
+  batchScheduleEnabled: 'false',
 } as const
 
 export type ConfigKey = keyof typeof CONFIG_DEFAULTS
@@ -30,8 +29,8 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
   if (key === 'businessHistoryStart') return Number.isNaN(Date.parse(value)) ? 'Business history start must be a valid date and time' : null
   if (key === 'defaultReportRangeDays') return ['7', '30', '90', 'all'].includes(value) ? null : 'Default report range must be 7, 30, 90, or all'
   if (key === 'aggregateMarketplaceVersions') return ['true', 'false'].includes(value) ? null : 'Marketplace aggregation must be true or false'
-  if (key === 'redemptionNftContract') return isValidAddress(value) ? null : 'Redemption NFT contract must be a valid 0x address'
   if (key === 'batchCutoffDays') return ['7', '30', 'all'].includes(value) ? null : 'Batch cutoff must be 7, 30, or all'
+  if (key === 'batchScheduleEnabled') return ['true', 'false'].includes(value) ? null : 'Batch schedule enabled must be true or false'
   return 'Unsupported configuration key'
 }
 

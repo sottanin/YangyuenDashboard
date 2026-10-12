@@ -62,10 +62,11 @@ No automated test framework is configured. Lint and build are the only required 
 ```
 DATABASE_URL="postgresql://postgres:postgres@localhost:5433/yangyuen?schema=public"
 AUTH_SECRET="<32+ random bytes>"            # required — session.ts throws if missing
+BATCH_SCHEDULER_SECRET="<32+ random bytes>" # required — authenticates the internal hourly scheduler
 SUPERADMIN_INITIAL_PASSWORD="<optional>"    # auto-generates a printed password if absent
 ```
 
-`.env` is never committed. `docker-compose.yml` reads `AUTH_SECRET` and `SUPERADMIN_INITIAL_PASSWORD` from the host environment and passes them into the container.
+`.env` is never committed. `docker-compose.yml` reads `AUTH_SECRET`, `BATCH_SCHEDULER_SECRET`, and `SUPERADMIN_INITIAL_PASSWORD` from the host environment and passes them into the containers.
 
 ## Coding Style & Naming Conventions
 
@@ -145,7 +146,7 @@ Marketplace v1 and v2 are versions of the same business role. Aggregate them tog
 
 For analytics, derive events using the combination of normalized token address, normalized From/To addresses, transaction hash, event key/log index, method, timestamp, and value. A transfer from Zero Wallet is a mint only in the context of the relevant token; a transfer to Zero Wallet is a burn only in the relevant swap or NFT-use flow. Do not classify solely from a display name or one address.
 
-The runtime redemption sync currently uses the hard-coded NFT contract `0xe089bc4b774b03f1D5F8C3f624603643F0718B62` in `src/lib/batchJob.ts`. Treat that as the current ingestion implementation, while the rules above define the business lifecycle. The database currently stores raw header/detail events and NFT ownership data; derived labels such as “locked,” “distributed,” “swapped,” “active,” and “used” are business interpretations unless explicitly materialized by a future schema change.
+Runtime ingestion is registry-driven: normal Token Sync reads active KAP-20/KAP-22 contracts into `TransactionHeader`/`TransactionDetail`, while NFT Redemption Sync reads every active KAP-721 contract into `RedemptionTransactionHeader`/`RedemptionTransactionDetail`. NFT instance identity is contract address + token ID. The database stores raw header/detail events and NFT ownership data; derived labels such as “locked,” “distributed,” “swapped,” “active,” and “used” are business interpretations unless explicitly materialized by a future schema change.
 
 ## Testing & Verification Guidelines
 
@@ -168,7 +169,7 @@ If a test runner is added later, prefer colocated `*.test.ts` / `*.test.tsx` and
 
 ## Security & Configuration Tips
 
-- Treat `AUTH_SECRET`, `SUPERADMIN_INITIAL_PASSWORD`, `POSTGRES_PASSWORD`, and `DATABASE_URL` as secrets — keep them in `.env` and out of source
+- Treat `AUTH_SECRET`, `BATCH_SCHEDULER_SECRET`, `SUPERADMIN_INITIAL_PASSWORD`, `POSTGRES_PASSWORD`, and `DATABASE_URL` as secrets — keep them in `.env` and out of source
 - Mutating API routes must enforce admin-only access at the route handler, not only in the middleware
 - Prisma migrations affect persisted dashboard data — review carefully and back up before destructive migrations
 - The `xlsx` import path runs only in the seed; do not introduce it into runtime API routes (denial-of-service risk on large uploads)

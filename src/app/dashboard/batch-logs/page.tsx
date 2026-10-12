@@ -20,8 +20,8 @@ interface BatchJobLog {
 type JobKey = 'token_sync' | 'redemption' | 'wallet_sync' | 'fee_update' | 'nft_instance'
 
 const JOBS: { key: JobKey; label: string; desc: string }[] = [
-  { key: 'token_sync',   label: 'Token Sync',          desc: 'ดึง ERC-20 transfers ทุก token' },
-  { key: 'redemption',   label: 'NFT Redemption',       desc: 'ดึง ERC-721 transfers + upsert NFT' },
+  { key: 'token_sync',   label: 'Token Sync',          desc: 'ดึง KAP-20/KAP-22 transfers จาก Token Registry' },
+  { key: 'redemption',   label: 'NFT Redemption',       desc: 'ดึง KAP-721 transfers จาก Token Registry + upsert NFT' },
   { key: 'wallet_sync',  label: 'Wallet Sync',          desc: 'อัปเดต balance ทุก wallet' },
   { key: 'fee_update',   label: 'Fee Update',           desc: 'เติม fee/gas ที่ยังเป็น 0' },
   { key: 'nft_instance', label: 'NFT Instance Update',  desc: 'อัปเดต metadata + tokenValue' },

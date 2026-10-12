@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) when working in this repository.
 
 ## What this is
 
-Internal admin dashboard for the Yangyuen loyalty program. Surfaces ERC-20 token activity, ERC-721 redemptions, wallet balances, and contract metadata pulled from the KubChain blockchain via the KubScan API. Production URL: **https://dashboard.yangyuen.com** (Cloudflare → Caddy → Next.js on droplet port 3001).
+Internal admin dashboard for the Yangyuen loyalty program. Surfaces KAP-20/KAP-22 token activity, KAP-721 redemptions, wallet balances, and contract metadata pulled from the KubChain blockchain via the KubScan API. Production URL: **https://dashboard.yangyuen.com** (Cloudflare → Caddy → Next.js on droplet port 3001).
 
 Separate from the public `yangyuen.com` site, which runs as a different stack on the same droplet.
 
@@ -32,6 +32,7 @@ npx prisma studio                      # GUI on 5555
 ```
 DATABASE_URL="postgresql://postgres:postgres@localhost:5433/yangyuen?schema=public"
 AUTH_SECRET="<random 32+ bytes>"
+BATCH_SCHEDULER_SECRET="<random 32+ bytes>"
 SUPERADMIN_INITIAL_PASSWORD="<optional — auto-generated if absent>"
 ```
 
@@ -109,11 +110,11 @@ Prisma schema at `prisma/schema.prisma`. Transaction data is split into header/d
 
 | Model | Purpose |
 |---|---|
-| `TransactionHeader` / `TransactionDetail` | ERC-20 transfers/mints from KubScan; header holds tx-level fields (fee, gas, status); detail holds per-token-event rows |
-| `RedemptionTransactionHeader` / `RedemptionTransactionDetail` | ERC-721 burns/transfers (loyalty redemptions) |
+| `TransactionHeader` / `TransactionDetail` | KAP-20/KAP-22 transfers/mints from KubScan; header holds tx-level fields (fee, gas, status); detail holds per-token-event rows |
+| `RedemptionTransactionHeader` / `RedemptionTransactionDetail` | KAP-721 burns/transfers (loyalty redemptions) |
 | `NFTInstance` | NFT metadata — food item names, IPFS images, owner hash |
 | `Wallet` | Token balances named by canonical symbol: `ICCYYN`, `FIT`, `TGT`, `INT`, `GRN` |
-| `TokenContract` | ERC-20 token name → contract address, optional `workspaceId` |
+| `TokenContract` | KAP-20/KAP-22/KAP-721 token registry with workspace ownership |
 | `AddressContract` | Named addresses (Loyalty Marketplace, fee wallets, etc.), optional `workspaceId` |
 | `Workspace` | Groups `TokenContract` + `AddressContract` |
 | `BatchJobLog` | One row per scheduled fetch run — counts, status, stop reason |
@@ -194,7 +195,7 @@ The droplet's `/opt/yangyuen-dashboard/` is NOT a git checkout. It holds `.env` 
 4. Restart app only: `ssh ... 'docker compose -f deploy-dashboard.compose.yml up -d app'`
 5. Smoke: `curl -sI http://localhost:3001` (on droplet) + `curl -sI https://yangyuen.com` (regression check)
 
-The compose **service name on the droplet is `app`** (host container name `yangyuen-dashboard-dashboard-app-1`). The droplet `.env` must include `POSTGRES_PASSWORD`, `AUTH_SECRET`, `SUPERADMIN_INITIAL_PASSWORD`, `TAG`, and optionally `IMAGE_REPO`.
+The compose **service name on the droplet is `app`** (host container name `yangyuen-dashboard-dashboard-app-1`). The droplet `.env` must include `POSTGRES_PASSWORD`, `AUTH_SECRET`, `BATCH_SCHEDULER_SECRET`, `SUPERADMIN_INITIAL_PASSWORD`, `TAG`, and optionally `IMAGE_REPO`.
 
 ### Rollback
 

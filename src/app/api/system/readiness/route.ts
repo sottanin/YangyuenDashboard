@@ -9,7 +9,6 @@ const REQUIRED_TOKEN_ROLES = new Map<string, string>([
   [normalizeAddress(TOKEN_ADDRESSES.grn), 'POINT_TOKEN'],
   [normalizeAddress(TOKEN_ADDRESSES.int), 'POINT_TOKEN'],
   [normalizeAddress(TOKEN_ADDRESSES.tgt), 'POINT_TOKEN'],
-  [normalizeAddress(TOKEN_ADDRESSES.redemptionNft), 'REDEMPTION_NFT'],
 ])
 
 const REQUIRED_ADDRESS_ROLES = new Map<string, string>([
@@ -27,12 +26,13 @@ const REQUIRED_ADDRESS_ROLES = new Map<string, string>([
 
 export async function GET(): Promise<NextResponse> {
   try {
-    const [config, activeTokens, activeAddresses, latestJobs] = await Promise.all([
+    const [config, activeTokens, activeRedemptionNfts, activeAddresses, latestJobs] = await Promise.all([
       getReportingConfig(),
       prisma.tokenContract.findMany({
         where: { active: true, normalizedAddress: { in: Array.from(REQUIRED_TOKEN_ROLES.keys()) } },
         select: { normalizedAddress: true, role: true, workspace: { select: { name: true } } },
       }),
+      prisma.tokenContract.count({ where: { active: true, standard: 'KAP-721' } }),
       prisma.addressContract.findMany({
         where: { active: true, normalizedAddress: { in: Array.from(REQUIRED_ADDRESS_ROLES.keys()) } },
         select: { normalizedAddress: true, role: true, workspace: { select: { name: true } } },
@@ -43,12 +43,8 @@ export async function GET(): Promise<NextResponse> {
     const validAddresses = activeAddresses.filter((record) => REQUIRED_ADDRESS_ROLES.get(record.normalizedAddress) === record.role && record.workspace?.name === 'SYSTEM')
     const tokenRegistryComplete = validTokens.length === REQUIRED_TOKEN_ROLES.size
     const addressRegistryComplete = validAddresses.length === REQUIRED_ADDRESS_ROLES.size
-    const nft = await prisma.tokenContract.findFirst({
-      where: { normalizedAddress: normalizeAddress(config.redemptionNftContract), active: true, role: 'REDEMPTION_NFT' },
-      select: { id: true },
-    })
     return NextResponse.json({
-      ready: tokenRegistryComplete && addressRegistryComplete && Boolean(nft) && !Number.isNaN(Date.parse(config.businessHistoryStart)),
+      ready: tokenRegistryComplete && addressRegistryComplete && activeRedemptionNfts > 0 && !Number.isNaN(Date.parse(config.businessHistoryStart)),
       checks: {
         activeTokenContracts: validTokens.length,
         requiredTokenContracts: REQUIRED_TOKEN_ROLES.size,
@@ -56,7 +52,7 @@ export async function GET(): Promise<NextResponse> {
         activeSystemAddresses: validAddresses.length,
         requiredSystemAddresses: REQUIRED_ADDRESS_ROLES.size,
         addressRegistryComplete,
-        redemptionNftConfigured: Boolean(nft),
+        redemptionNftConfigured: activeRedemptionNfts > 0,
         businessHistoryStartConfigured: !Number.isNaN(Date.parse(config.businessHistoryStart)),
       },
       latestJobs,

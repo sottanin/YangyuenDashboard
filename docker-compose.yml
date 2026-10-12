@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5433:5432"     # host:5433 for local psql / Prisma Studio
+      - "127.0.0.1:5433:5432"     # host:5433 for local psql / Prisma Studio
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -27,7 +27,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3001:3000"     # host:3001 → container:3000 (3000 used by another project)
+      - "127.0.0.1:3001:3000"     # host:3001 → container:3000 (3000 used by another project)
     environment:
       NODE_ENV: production
       # Inside Docker, the postgres hostname is the service name "postgres",
@@ -38,12 +38,30 @@ services:
       AUTH_SECRET: ${AUTH_SECRET}
       # Optional: set initial superadmin password on first deploy; omit to auto-generate
       SUPERADMIN_INITIAL_PASSWORD: ${SUPERADMIN_INITIAL_PASSWORD:-}
+      BATCH_SCHEDULER_SECRET: ${BATCH_SCHEDULER_SECRET:?BATCH_SCHEDULER_SECRET is required}
       TOKEN_IMAGE_DIR: /app/data/token-images
     volumes:
       - token_images:/app/data/token-images
     depends_on:
       postgres:
         condition: service_healthy   # wait for pg_isready before starting Next.js
+    restart: unless-stopped
+
+  scheduler:
+    image: alpine:3.20
+    environment:
+      BATCH_SCHEDULER_SECRET: ${BATCH_SCHEDULER_SECRET:?BATCH_SCHEDULER_SECRET is required}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        printf '%s\n' '#!/bin/sh' "exec wget -qO- --post-data=\"\" --header=\"Authorization: Bearer \$$BATCH_SCHEDULER_SECRET\" http://web:3000/api/internal/batch-schedule/run" > /usr/local/bin/run-batch-schedule
+        chmod 700 /usr/local/bin/run-batch-schedule
+        echo '0 * * * * /usr/local/bin/run-batch-schedule' > /etc/crontabs/root
+        exec crond -f -l 2
+    depends_on:
+      web:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
