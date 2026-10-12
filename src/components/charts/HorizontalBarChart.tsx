@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { useResolvedColors } from './useResolvedColors'
+import { Icon } from '@/components/ui/Icon'
 
 export interface HorizontalBarPoint {
   walletAddress: string
@@ -26,6 +27,14 @@ function formatExactAmount(value: string): string {
   const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   const visibleFraction = fraction.replace(/0+$/, '')
   return `${sign}${grouped}${visibleFraction ? `.${visibleFraction}` : ''}`
+}
+
+function RankMarker({ index, y }: { index: number; y: number }): React.JSX.Element {
+  if (index > 2) return <text x="0" y={y} fontSize="10.5" fill="rgb(var(--text-faint))">#{index + 1}</text>
+  const colorClass = index === 0 ? 'text-yellow-500' : index === 1 ? 'text-slate-300' : 'text-amber-700'
+  return <g transform={`translate(0 ${y - 12})`} className={colorClass} fill="currentColor" aria-label={`Rank ${index + 1}`}>
+    <path d="M4 2h10v3.1c0 3.4-2 5.9-5 6.6v2.1h3v2H6v-2h3v-2.1C6 11 4 8.5 4 5.1V2Zm-2 1h2v2.2C4 7.1 3 8.4 1.2 8.8L.5 7.1C1.5 6.8 2 6.2 2 5.2V3Zm12 0h2v2.2c0 1 .5 1.6 1.5 1.9l-.7 1.7C15 8.4 14 7.1 14 5.2V3Z" />
+  </g>
 }
 
 export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', ariaLabel }: HorizontalBarChartProps): React.JSX.Element {
@@ -81,9 +90,10 @@ export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', aria
         const barHeight = rowHeight * 0.66
         const barWidth = (numericValues[index] / maximum) * innerWidth
         return <g key={point.walletAddress} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)}>
-          <text x="0" y={y + barHeight / 2 + 4} fontSize="10.5" fill="rgb(var(--text-faint))">#{index + 1}</text>
-          <a href={`https://www.kubscan.com/address/${encodeURIComponent(point.walletAddress)}?tab=token_transfers`} target="_blank" rel="noopener noreferrer" aria-label={`Open wallet ${point.walletAddress} on KubScan`}>
-            <text x="24" y={y + barHeight / 2 + 4} fontSize="10.5" fill="rgb(var(--text-muted))" className="hover:fill-[rgb(var(--accent))]">{compactAddress(point.walletAddress)}</text>
+          <RankMarker index={index} y={y + barHeight / 2 + 4} />
+          <a href={`https://www.kubscan.com/address/${encodeURIComponent(point.walletAddress)}?tab=tokens`} target="_blank" rel="noopener noreferrer" aria-label={`Open rank ${index + 1} wallet ${point.walletAddress} tokens on KubScan`} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)}>
+            <g transform={`translate(24 ${y + barHeight / 2 - 6})`} fill="none" stroke="rgb(var(--text-muted))" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="4" r="3" /><path d="M1 13v-1c0-2.2 2.2-4 5-4s5 1.8 5 4v1" /></g>
+            <text x="40" y={y + barHeight / 2 + 4} fontSize="10.5" fill="rgb(var(--text-muted))" className="hover:fill-[rgb(var(--accent))]">{compactAddress(point.walletAddress)}</text>
           </a>
           <rect x={left} y={y} width={innerWidth} height={barHeight} rx="5" fill="rgb(var(--grid))" opacity="0.28" />
           <rect x={left} y={y} width={Math.max(2, barWidth)} height={barHeight} rx="5" fill={`url(#${gradientId})`} opacity={hovered !== null && hovered !== index ? 0.48 : 1} />
@@ -92,9 +102,9 @@ export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', aria
       })}
     </svg>
     {hoveredPoint ? <div ref={tooltipRef} className="chart-tooltip" style={{ left: `${tooltipLeft}px`, top: `${tooltipTop}px`, transform: 'none' }}>
-      <div className="font-mono text-xs font-semibold">{hoveredPoint.walletAddress}</div>
+      <div className="flex items-center gap-1.5 font-mono text-xs font-semibold"><Icon name="user" size={13} />{hoveredPoint.walletAddress}</div>
       <div className="mt-1 flex items-center gap-2 whitespace-nowrap"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: barColor }} aria-hidden="true" /><span><span className="font-mono">{formatExactAmount(hoveredPoint.amount)}</span> {symbol}</span></div>
     </div> : null}
-    <div className="sr-only"><ol>{data.map((point) => <li key={point.walletAddress}>{point.walletAddress}: {formatExactAmount(point.amount)} {symbol}</li>)}</ol></div>
+    <div className="sr-only"><ol>{data.map((point, index) => <li key={point.walletAddress}>Rank {index + 1}, {point.walletAddress}: {formatExactAmount(point.amount)} {symbol}</li>)}</ol></div>
   </div>
 }

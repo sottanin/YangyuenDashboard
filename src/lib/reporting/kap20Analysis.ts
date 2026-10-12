@@ -6,21 +6,32 @@ import { normalizeAddress, TOKEN_ADDRESSES } from '@/lib/system/addresses'
 import { getWorkspaceReportScope } from './workspaceScope'
 import { reportingDaySql } from './reportingDay'
 
-interface AggregateRow { mint: Prisma.Decimal | null; initial_balance: Prisma.Decimal | null; main_balance: Prisma.Decimal | null; user_balance: Prisma.Decimal | null; redemption: Prisma.Decimal | null }
+interface AggregateRow { mint: Prisma.Decimal | null; backup_balance: Prisma.Decimal | null; user_balance: Prisma.Decimal | null; redemption: Prisma.Decimal | null }
 interface DailyRow { day: Date | string; total_transactions: bigint; total_amount: Prisma.Decimal | null }
 interface TopRow { wallet_address: string; amount: Prisma.Decimal }
+interface WalletBalanceRow { normalized_address: string; balance: Prisma.Decimal | null }
+interface PointTokenPerformanceRow { normalized_address: string; incoming_transfers: Prisma.Decimal | null; outgoing_transfers: Prisma.Decimal | null }
 
 function amount(value: Prisma.Decimal | string | null | undefined): string { return value?.toString() ?? '0' }
-function addressArray(values: string[]): Prisma.Sql { return Prisma.sql`ARRAY[${Prisma.join(values)}]::text[]` }
+function addressArray(values: string[]): Prisma.Sql {
+  return values.length > 0 ? Prisma.sql`ARRAY[${Prisma.join(values)}]::text[]` : Prisma.sql`ARRAY[]::text[]`
+}
 
 async function context(workspace: number | 'all') {
   const [scope, config, token, addresses] = await Promise.all([
     getWorkspaceReportScope(workspace), getReportingConfig(),
     prisma.tokenContract.findFirst({ where: { normalizedAddress: normalizeAddress(TOKEN_ADDRESSES.iccyyn), active: true, ...(workspace === 'all' ? {} : { workspaceId: workspace }) }, select: { id: true, name: true, symbol: true, address: true, imageKey: true } }),
-    prisma.addressContract.findMany({ where: { active: true, role: { in: ['ZERO', 'INITIAL_MINT', 'MAIN', 'MARKETPLACE'] }, ...(workspace === 'all' ? {} : { OR: [{ workspaceId: workspace }, { workspace: { name: 'SYSTEM' } }] }) }, select: { role: true, normalizedAddress: true } }),
+    prisma.addressContract.findMany({ where: { role: { in: ['ZERO', 'INITIAL_MINT', 'MAIN', 'WORKSPACE', 'LOYALTY_SWAP', 'MARKETPLACE'] }, ...(workspace === 'all' ? {} : { OR: [{ workspaceId: workspace }, { workspace: { name: 'SYSTEM' } }] }) }, select: { role: true, normalizedAddress: true } }),
   ])
   if (!token) return null
-  return { scope, historyStart: new Date(config.businessHistoryStart), timezone: config.reportingTimezone, token: { id: token.id, name: token.name, symbol: token.symbol ?? 'ICCYYN', address: token.address, imageUrl: token.imageKey ? `/api/contracts/token/${token.id}/image` : null }, zero: addresses.filter((row) => row.role === 'ZERO').map((row) => row.normalizedAddress), initial: addresses.filter((row) => row.role === 'INITIAL_MINT').map((row) => row.normalizedAddress), main: addresses.filter((row) => row.role === 'MAIN').map((row) => row.normalizedAddress), marketplaces: addresses.filter((row) => row.role === 'MARKETPLACE').map((row) => row.normalizedAddress) }
+  const pointContracts = await prisma.tokenContract.findMany({
+    // Include inactive contracts so registry lifecycle changes do not erase
+    // historical ICCYYN lock and swap legs from this balance.
+    where: { role: 'POINT_TOKEN', ...(workspace === 'all' ? {} : { workspaceId: workspace }) },
+    select: { id: true, name: true, symbol: true, address: true, normalizedAddress: true, imageKey: true, active: true },
+    orderBy: [{ name: 'asc' }, { normalizedAddress: 'asc' }],
+  })
+  return { scope, historyStart: new Date(config.businessHistoryStart), timezone: config.reportingTimezone, token: { id: token.id, name: token.name, symbol: token.symbol ?? 'ICCYYN', address: token.address, imageUrl: token.imageKey ? `/api/contracts/token/${token.id}/image` : null }, zero: addresses.filter((row) => row.role === 'ZERO').map((row) => row.normalizedAddress), initialMintWallets: addresses.filter((row) => row.role === 'INITIAL_MINT').map((row) => row.normalizedAddress), main: addresses.filter((row) => row.role === 'MAIN').map((row) => row.normalizedAddress), workspaceWallets: addresses.filter((row) => row.role === 'WORKSPACE').map((row) => row.normalizedAddress), loyaltySwaps: addresses.filter((row) => row.role === 'LOYALTY_SWAP').map((row) => row.normalizedAddress), marketplaces: addresses.filter((row) => row.role === 'MARKETPLACE').map((row) => row.normalizedAddress), pointContracts }
 }
 
 export async function listKap20Tokens(workspace: number | 'all') {
@@ -31,26 +42,79 @@ export async function listKap20Tokens(workspace: number | 'all') {
 export async function getKap20Summary(tokenAddress: string, workspace: number | 'all') {
   const value = await context(workspace)
   if (!value || normalizeAddress(tokenAddress) !== normalizeAddress(value.token.address)) return null
-  const zero = addressArray(value.zero); const initial = addressArray(value.initial); const main = addressArray(value.main); const marketplace = addressArray(value.marketplaces)
+  const zero = addressArray(value.zero); const main = addressArray(value.main); const incomingWallets = addressArray([...value.initialMintWallets, ...value.workspaceWallets]); const outgoingTargets = addressArray([...value.loyaltySwaps, ...value.workspaceWallets]); const marketplace = addressArray(value.marketplaces); const pointContractAddresses = value.pointContracts.map((contract) => contract.normalizedAddress); const pointContracts = addressArray(pointContractAddresses)
   const token = normalizeAddress(value.token.address)
   const reportingDay = reportingDaySql(Prisma.raw('"timestamp"'), value.timezone)
-  const [totals, days] = await Promise.all([
+  const [totals, days, walletBalances, pointTokenPerformance] = await Promise.all([
     prisma.$queryRaw<AggregateRow[]>(Prisma.sql`
       WITH events AS (SELECT * FROM "TransactionDetail" WHERE LOWER("tokenAddress") = ${token} AND "timestamp" >= ${value.historyStart}),
       registered AS (SELECT "normalizedAddress" FROM "AddressContract" UNION SELECT "normalizedAddress" FROM "TokenContract")
       SELECT
         COALESCE(SUM(CASE WHEN LOWER("fromHash") = ANY(${zero}) THEN "value" ELSE 0 END), 0) mint,
-        COALESCE(SUM(CASE WHEN LOWER("toHash") = ANY(${initial}) THEN "value" ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN LOWER("fromHash") = ANY(${initial}) THEN "value" ELSE 0 END), 0) initial_balance,
-        COALESCE(SUM(CASE WHEN LOWER("toHash") = ANY(${main}) THEN "value" ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN LOWER("fromHash") = ANY(${main}) THEN "value" ELSE 0 END), 0) main_balance,
-        COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(events."toHash")) THEN "value" ELSE 0 END), 0)
-          - COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(events."fromHash")) THEN "value" ELSE 0 END), 0) user_balance,
+        COALESCE(SUM(CASE WHEN LOWER("toHash") = ANY(${main}) THEN "value" ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN LOWER("fromHash") = ANY(${main}) THEN "value" ELSE 0 END), 0) backup_balance,
+        (SELECT COALESCE(SUM(snapshot.balance), 0)
+          FROM (
+            SELECT LOWER(wallet."walletId") AS normalized_address, wallet."ICCYYN" AS balance,
+              ROW_NUMBER() OVER (PARTITION BY LOWER(wallet."walletId") ORDER BY wallet."timestamp" DESC NULLS LAST, wallet.id DESC) AS snapshot_rank
+            FROM "Wallet" wallet
+          ) snapshot
+          WHERE snapshot.snapshot_rank = 1
+            AND NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = snapshot.normalized_address)
+            AND EXISTS (SELECT 1 FROM events evidence WHERE LOWER(evidence."fromHash") = snapshot.normalized_address OR LOWER(evidence."toHash") = snapshot.normalized_address)) user_balance,
         COALESCE(SUM(CASE WHEN LOWER("toHash") = ANY(${marketplace}) AND NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(events."fromHash")) THEN "value" ELSE 0 END), 0) redemption
       FROM events
     `),
     prisma.$queryRaw<DailyRow[]>(Prisma.sql`SELECT ${reportingDay} AS "day", COUNT(DISTINCT "txId")::bigint AS total_transactions, COALESCE(SUM("value"), 0) AS total_amount FROM "TransactionDetail" WHERE LOWER("tokenAddress") = ${token} AND "timestamp" >= ${value.historyStart} GROUP BY "day" ORDER BY "day"`),
+    prisma.$queryRaw<WalletBalanceRow[]>(Prisma.sql`
+      WITH ranked AS (
+        SELECT LOWER("walletId") AS normalized_address, "ICCYYN" AS balance,
+          ROW_NUMBER() OVER (PARTITION BY LOWER("walletId") ORDER BY "timestamp" DESC NULLS LAST, id DESC) AS row_number
+        FROM "Wallet"
+        WHERE LOWER("walletId") = ANY(${addressArray([...value.workspaceWallets, ...pointContractAddresses])})
+      )
+      SELECT normalized_address, balance FROM ranked WHERE row_number = 1
+    `),
+    prisma.$queryRaw<PointTokenPerformanceRow[]>(Prisma.sql`
+      SELECT LOWER(point."pointAddress") AS normalized_address,
+        COALESCE(SUM(CASE WHEN LOWER(detail."toHash") = LOWER(point."pointAddress") AND LOWER(detail."fromHash") = ANY(${incomingWallets}) THEN detail."value" ELSE 0 END), 0) AS incoming_transfers,
+        COALESCE(SUM(CASE WHEN LOWER(detail."fromHash") = LOWER(point."pointAddress") AND LOWER(detail."toHash") = ANY(${outgoingTargets}) THEN detail."value" ELSE 0 END), 0) AS outgoing_transfers
+      FROM UNNEST(${pointContracts}) AS point("pointAddress")
+      LEFT JOIN "TransactionDetail" detail
+        ON LOWER(detail."tokenAddress") = ${token}
+        AND detail."timestamp" >= ${value.historyStart}
+        AND ((LOWER(detail."toHash") = LOWER(point."pointAddress") AND LOWER(detail."fromHash") = ANY(${incomingWallets}))
+          OR (LOWER(detail."fromHash") = LOWER(point."pointAddress") AND LOWER(detail."toHash") = ANY(${outgoingTargets})))
+      GROUP BY LOWER(point."pointAddress")
+    `),
   ])
   const total = totals[0]
-  return { token: value.token, mint: amount(total?.mint), distributorPool: amount(total?.initial_balance), operationPool: amount(total?.main_balance), transferToUsers: amount(total?.user_balance), burn: amount(total?.redemption), reconciliationDelta: '0', reconciliationMatched: true, daily: days.map((day) => ({ date: day.day instanceof Date ? day.day.toISOString().slice(0, 10) : String(day.day).slice(0, 10), totalTransactions: Number(day.total_transactions), totalAmount: amount(day.total_amount) })), timezone: value.timezone, historyStart: value.historyStart.toISOString() }
+  const balances = new Map(walletBalances.map((row) => [row.normalized_address, amount(row.balance)]))
+  const performance = new Map(pointTokenPerformance.map((row) => [row.normalized_address, { incoming: amount(row.incoming_transfers), outgoing: amount(row.outgoing_transfers) }]))
+  const sumBalances = (addresses: string[]): string => addresses.reduce((sum, address) => sum.add(new Prisma.Decimal(balances.get(address) ?? '0')), new Prisma.Decimal(0)).toString()
+  const workspaceWallet = sumBalances(value.workspaceWallets)
+  const distributorPool = sumBalances(pointContractAddresses)
+  const pointTokenLocks = value.pointContracts.map((contract) => ({
+    id: contract.id,
+    name: contract.name,
+    symbol: contract.symbol ?? contract.name,
+    address: contract.address,
+    imageUrl: contract.imageKey ? `/api/contracts/token/${contract.id}/image` : null,
+    active: contract.active,
+    incomingTransfers: performance.get(contract.normalizedAddress)?.incoming ?? '0',
+    outgoingTransfers: performance.get(contract.normalizedAddress)?.outgoing ?? '0',
+  }))
+  return {
+    token: value.token,
+    mint: amount(total?.mint),
+    backupWallet: amount(total?.backup_balance),
+    workspaceWallet,
+    distributorPool,
+    userWallet: amount(total?.user_balance),
+    redemptionBurn: amount(total?.redemption),
+    pointTokenLocks,
+    reconciliationDelta: '0', reconciliationMatched: true,
+    daily: days.map((day) => ({ date: day.day instanceof Date ? day.day.toISOString().slice(0, 10) : String(day.day).slice(0, 10), totalTransactions: Number(day.total_transactions), totalAmount: amount(day.total_amount) })), timezone: value.timezone, historyStart: value.historyStart.toISOString(),
+  }
 }
 
 export async function getKap20Transactions(tokenAddress: string, workspace: number | 'all', page: number, limit: number, search = '') {
@@ -93,7 +157,7 @@ export async function getKap20TopUsers(tokenAddress: string, workspace: number |
         SELECT
           wallet."walletId" AS wallet_address,
           LOWER(wallet."walletId") AS normalized_address,
-          wallet."balanceICC" AS amount,
+          wallet."ICCYYN" AS amount,
           ROW_NUMBER() OVER (
             PARTITION BY LOWER(wallet."walletId")
             ORDER BY wallet."timestamp" DESC NULLS LAST, wallet.id DESC

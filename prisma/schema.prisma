@@ -130,11 +130,11 @@ model Wallet {
   walletId         String    @unique
   timestamp        DateTime?
   notify           String?
-  balanceICC       Decimal   @default(0)
-  balanceGreen     Decimal   @default(0)
-  balanceTogether  Decimal   @default(0)
-  balanceIntegrity Decimal   @default(0)
-  balanceFit       Decimal   @default(0)
+  ICCYYN           Decimal   @default(0)
+  FIT              Decimal   @default(0)
+  TGT              Decimal   @default(0)
+  INT              Decimal   @default(0)
+  GRN              Decimal   @default(0)
 
   @@index([walletId])
 }

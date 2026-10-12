@@ -12,11 +12,11 @@ import { useWorkspace } from '@/lib/WorkspaceContext'
 interface WalletRow {
   id: string
   walletId: string
-  balanceICC: string
-  balanceGreen: string
-  balanceTogether: string
-  balanceIntegrity: string
-  balanceFit: string
+  ICCYYN: string
+  FIT: string
+  TGT: string
+  INT: string
+  GRN: string
 }
 
 function trunc(s: string) {
@@ -62,11 +62,11 @@ export default function WalletsPage() {
   }, [fetchWallets, page])
 
   // Compute KPI values from wallets data
-  const topICC = wallets.length > 0 ? Math.max(...wallets.map(w => parseFloat(w.balanceICC))) : 0
-  const topGreen = wallets.length > 0 ? Math.max(...wallets.map(w => parseFloat(w.balanceGreen))) : 0
+  const topICC = wallets.length > 0 ? Math.max(...wallets.map(w => parseFloat(w.ICCYYN))) : 0
+  const topGreen = wallets.length > 0 ? Math.max(...wallets.map(w => parseFloat(w.GRN))) : 0
   const avgTotal = wallets.length > 0
     ? wallets.reduce((s, w) =>
-        s + parseFloat(w.balanceICC) + parseFloat(w.balanceGreen) + parseFloat(w.balanceTogether) + parseFloat(w.balanceIntegrity) + parseFloat(w.balanceFit), 0
+        s + parseFloat(w.ICCYYN) + parseFloat(w.GRN) + parseFloat(w.TGT) + parseFloat(w.INT) + parseFloat(w.FIT), 0
       ) / wallets.length
     : 0
 
@@ -79,7 +79,7 @@ export default function WalletsPage() {
     { label: '2K+', value: 0 },
   ]
   wallets.forEach(w => {
-    const v = parseFloat(w.balanceICC)
+    const v = parseFloat(w.ICCYYN)
     if (v === 0) ICC_BUCKETS[0].value++
     else if (v <= 100) ICC_BUCKETS[1].value++
     else if (v <= 500) ICC_BUCKETS[2].value++
@@ -131,7 +131,7 @@ export default function WalletsPage() {
         <Card title="Token Summary" subtitle="Across all wallets">
           <div className="space-y-3 mt-1">
             {['ICC-YANGYUEN', 'Green', 'Together', 'Integrity', 'Fit'].map((name, i) => {
-              const keys = ['balanceICC', 'balanceGreen', 'balanceTogether', 'balanceIntegrity', 'balanceFit'] as const
+              const keys = ['ICCYYN', 'GRN', 'TGT', 'INT', 'FIT'] as const
               const key = keys[i]
               const sum = wallets.reduce((s, w) => s + parseFloat(w[key]), 0)
               const max = wallets.length > 0 ? Math.max(...wallets.map(w => parseFloat(w[key]))) : 1
@@ -188,11 +188,11 @@ export default function WalletsPage() {
                   {wallets.map((w) => (
                     <tr key={w.id} className="tbl-row border-b border-default last:border-0">
                       <td className="px-5 py-3 font-mono text-xs text-default">{trunc(w.walletId)}</td>
-                      <td className="px-3 py-3 text-right font-mono text-xs text-default">{parseFloat(w.balanceICC).toFixed(2)}</td>
-                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.balanceGreen).toFixed(2)}</td>
-                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.balanceTogether).toFixed(2)}</td>
-                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.balanceIntegrity).toFixed(2)}</td>
-                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.balanceFit).toFixed(2)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-xs text-default">{parseFloat(w.ICCYYN).toFixed(2)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.GRN).toFixed(2)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.TGT).toFixed(2)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.INT).toFixed(2)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.FIT).toFixed(2)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -112,13 +112,15 @@ Prisma schema at `prisma/schema.prisma`. Transaction data is split into header/d
 | `TransactionHeader` / `TransactionDetail` | ERC-20 transfers/mints from KubScan; header holds tx-level fields (fee, gas, status); detail holds per-token-event rows |
 | `RedemptionTransactionHeader` / `RedemptionTransactionDetail` | ERC-721 burns/transfers (loyalty redemptions) |
 | `NFTInstance` | NFT metadata — food item names, IPFS images, owner hash |
-| `Wallet` | 5-token balances: `balanceICC`, `balanceGreen`, `balanceTogether`, `balanceIntegrity`, `balanceFit` |
+| `Wallet` | Token balances named by canonical symbol: `ICCYYN`, `FIT`, `TGT`, `INT`, `GRN` |
 | `TokenContract` | ERC-20 token name → contract address, optional `workspaceId` |
 | `AddressContract` | Named addresses (Loyalty Marketplace, fee wallets, etc.), optional `workspaceId` |
 | `Workspace` | Groups `TokenContract` + `AddressContract` |
 | `BatchJobLog` | One row per scheduled fetch run — counts, status, stop reason |
 | `AdminUser` | Username/email + PBKDF2 password hash + role (`admin` / `superadmin`) |
 | `SystemConfig` | Generic key/value store for runtime settings |
+
+Wallet balance columns must use the canonical token symbol exactly. Wallet Sync must map each balance column from an explicit, case-insensitive canonical contract-address → symbol allowlist; never derive the destination column from untrusted API name/symbol metadata. Add a migration and update the allowlist whenever a supported token is added.
 
 ## API Routes
 

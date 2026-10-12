@@ -87,6 +87,7 @@ SUPERADMIN_INITIAL_PASSWORD="<optional>"    # auto-generates a printed password 
 
 - Transaction data is stored as paired header/detail tables (`TransactionHeader`/`TransactionDetail`, `RedemptionTransactionHeader`/`RedemptionTransactionDetail`). There is no flat `Transaction` model.
 - Wei → decimal conversion uses string padding (see `fromWei` in `batchJob.ts`); never use `Number()` on raw wei values
+- Name each `Wallet` balance column with the canonical token symbol (currently `ICCYYN`, `FIT`, `TGT`, `INT`, and `GRN`). Wallet Sync must map canonical contract addresses to these columns through an explicit address → symbol allowlist; do not trust token name or symbol metadata returned by KubScan.
 - Add a Prisma migration for any schema change and check that it applies cleanly against a fresh database before handoff
 
 ## Blockchain Transaction Domain Model

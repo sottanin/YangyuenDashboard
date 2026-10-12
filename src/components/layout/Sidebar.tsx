@@ -4,7 +4,6 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { Icon } from '@/components/ui/Icon'
-import { useWorkspace } from '@/lib/WorkspaceContext'
 import { MENU_CATALOG } from '@/lib/auth/menuCatalog'
 
 type SidebarState = 'open' | 'narrow' | 'closed'
@@ -22,7 +21,6 @@ interface SidebarProps {
 
 export function Sidebar({ state, admin }: SidebarProps) {
   const pathname = usePathname()
-  const { selected } = useWorkspace()
   const isNarrow = state === 'narrow'
   if (state === 'closed') return null
 
@@ -31,8 +29,6 @@ export function Sidebar({ state, admin }: SidebarProps) {
     return pathname.startsWith(href)
   }
 
-  const wsLabel = selected.id === 'all' ? 'All Workspaces' : selected.name
-  const wsInitials = selected.id === 'all' ? '∞' : selected.name.slice(0, 2).toUpperCase()
   const visibleMenus = MENU_CATALOG.filter((menu) => admin.menuKeys.includes('*') || admin.menuKeys.includes(menu.key))
   const sections = ['Workspace', 'Blockchain', 'System'].map((section) => ({ section, items: visibleMenus.filter((menu) => menu.section === section) })).filter((section) => section.items.length > 0)
 
@@ -55,23 +51,6 @@ export function Sidebar({ state, admin }: SidebarProps) {
             </div>
           )}
         </div>
-
-        {/* Workspace label */}
-        {!isNarrow && (
-          <div className="flex items-center gap-2 mx-1 mb-3 px-2.5 py-2 rounded-lg border border-default bg-surface/50">
-            <div
-              className="w-6 h-6 rounded flex items-center justify-center text-[10px] font-semibold text-white flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, rgb(var(--accent-2)), rgb(var(--accent-3)))' }}
-            >
-              {wsInitials}
-            </div>
-            <div className="flex-1 text-left min-w-0">
-              <div className="text-xs font-medium text-default truncate">Yangyuen</div>
-              <div className="text-[10px] text-faint truncate">{wsLabel}</div>
-            </div>
-            <Icon name="chevD" size={12} className="text-faint flex-shrink-0" />
-          </div>
-        )}
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto thin-scroll">

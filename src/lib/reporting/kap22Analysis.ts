@@ -93,10 +93,10 @@ interface TopUserRow {
 }
 
 function walletBalanceColumn(normalizedToken: string): Prisma.Sql {
-  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.fit)) return Prisma.raw('"balanceFit"')
-  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.grn)) return Prisma.raw('"balanceGreen"')
-  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.int)) return Prisma.raw('"balanceIntegrity"')
-  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.tgt)) return Prisma.raw('"balanceTogether"')
+  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.fit)) return Prisma.raw('"FIT"')
+  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.grn)) return Prisma.raw('"GRN"')
+  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.int)) return Prisma.raw('"INT"')
+  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.tgt)) return Prisma.raw('"TGT"')
   throw new Error('Unsupported KAP-22 token address')
 }
 

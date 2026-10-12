@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     let total: number
     if (scope.tokenAddresses === null) {
       [wallets, total] = await Promise.all([
-        prisma.wallet.findMany({ orderBy: { balanceICC: 'desc' }, skip, take: limit }),
+        prisma.wallet.findMany({ orderBy: { ICCYYN: 'desc' }, skip, take: limit }),
         prisma.wallet.count(),
       ])
     } else if (scope.tokenAddresses.length === 0) {
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
         )
       `
       const [rows, counts] = await Promise.all([
-        prisma.$queryRaw<Wallet[]>(Prisma.sql`SELECT wallet.* FROM "Wallet" wallet WHERE ${scoped} ORDER BY wallet."balanceICC" DESC OFFSET ${skip} LIMIT ${limit}`),
+        prisma.$queryRaw<Wallet[]>(Prisma.sql`SELECT wallet.* FROM "Wallet" wallet WHERE ${scoped} ORDER BY wallet."ICCYYN" DESC OFFSET ${skip} LIMIT ${limit}`),
         prisma.$queryRaw<CountRow[]>(Prisma.sql`SELECT COUNT(*)::bigint count FROM "Wallet" wallet WHERE ${scoped}`),
       ])
       wallets = rows
@@ -55,11 +55,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       wallets: wallets.map((w) => ({
         ...w,
-        balanceICC: scopedSymbols === null || scopedSymbols.has('ICCYYN') ? w.balanceICC.toString() : '0',
-        balanceGreen: scopedSymbols === null || scopedSymbols.has('GRN') ? w.balanceGreen.toString() : '0',
-        balanceTogether: scopedSymbols === null || scopedSymbols.has('TGT') ? w.balanceTogether.toString() : '0',
-        balanceIntegrity: scopedSymbols === null || scopedSymbols.has('INT') ? w.balanceIntegrity.toString() : '0',
-        balanceFit: scopedSymbols === null || scopedSymbols.has('FIT') ? w.balanceFit.toString() : '0',
+        ICCYYN: scopedSymbols === null || scopedSymbols.has('ICCYYN') ? w.ICCYYN.toString() : '0',
+        FIT: scopedSymbols === null || scopedSymbols.has('FIT') ? w.FIT.toString() : '0',
+        TGT: scopedSymbols === null || scopedSymbols.has('TGT') ? w.TGT.toString() : '0',
+        INT: scopedSymbols === null || scopedSymbols.has('INT') ? w.INT.toString() : '0',
+        GRN: scopedSymbols === null || scopedSymbols.has('GRN') ? w.GRN.toString() : '0',
       })),
       total,
       page,

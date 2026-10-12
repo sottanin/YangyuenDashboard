@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { SkeletonKpi, SkeletonTable } from '@/components/ui/SkeletonCard'
 import { SingleLineChart, type SingleLinePoint } from '@/components/charts/SingleLineChart'
 import { HorizontalBarChart, type HorizontalBarPoint } from '@/components/charts/HorizontalBarChart'
+import { PointTokenLockDonuts, type PointTokenLock } from '@/components/charts/PointTokenLockDonuts'
 import { useWorkspace } from '@/lib/WorkspaceContext'
 import { TokenAvatar } from '@/components/ui/TokenAvatar'
 
@@ -27,6 +28,11 @@ interface SummaryResponse {
   daily: Array<{ date: string; totalTransactions: number; totalAmount: string }>
   timezone: string
   historyStart: string
+  backupWallet?: string
+  workspaceWallet?: string
+  userWallet?: string
+  redemptionBurn?: string
+  pointTokenLocks?: PointTokenLock[]
 }
 type TransactionType = 'Mint' | 'Burn' | 'Transfer'
 interface TransactionRow {
@@ -311,13 +317,15 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
       <Card><div className="py-12 text-center"><div className="text-sm font-medium text-default">No active {reportLabel} tokens</div><p className="mt-1 text-xs text-muted">Add an active token contract in the registry.</p></div></Card>
     ) : <>
       {summaryError ? <div className="mb-4"><ErrorCard message={summaryError} onRetry={() => selectedToken && void loadSummary(selectedToken)} /></div> : summaryLoading || !summary ? (
-        <section aria-label="KAP-22 key performance indicators" aria-live="polite" className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{[0, 1, 2, 3, 4].map((key) => <SkeletonKpi key={key} />)}</section>
-      ) : <section aria-label="KAP-22 key performance indicators" aria-live="polite" className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <section aria-label={`${reportLabel} key performance indicators`} aria-live="polite" className={`mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 ${isKap20 ? 'xl:grid-cols-3' : 'xl:grid-cols-5'}`}>{Array.from({ length: isKap20 ? 6 : 5 }, (_, key) => <SkeletonKpi key={key} />)}</section>
+      ) : <section aria-label={`${reportLabel} key performance indicators`} aria-live="polite" className={`mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 ${isKap20 ? 'xl:grid-cols-3' : 'xl:grid-cols-5'}`}>
         <KpiTile label="Mint" value={`${formatAmount(summary.mint)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="arrowUp" sparkColor="var(--success)" />
-        <KpiTile label={isKap20 ? 'Initial Mint Wallet' : 'DistributorPool'} value={`${formatAmount(summary.distributorPool)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="box" />
-        <KpiTile label={isKap20 ? 'Main Wallet' : 'OperationPool'} value={`${formatAmount(summary.operationPool)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="target" sparkColor="var(--accent-3)" />
-        <KpiTile label="User Wallet" value={`${formatAmount(summary.transferToUsers)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="users" sparkColor="var(--accent-2)" />
-        <KpiTile label={isKap20 ? 'KAP-20 Redemption' : 'Burn Wallet'} value={`${formatAmount(summary.burn)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="refresh" sparkColor="var(--danger)" />
+        {isKap20 ? <KpiTile label="Backup Wallet" value={`${formatAmount(summary.backupWallet ?? '0')} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="target" sparkColor="var(--accent-3)" /> : null}
+        {isKap20 ? <KpiTile label="Workspace Wallet" value={`${formatAmount(summary.workspaceWallet ?? '0')} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="lock" sparkColor="var(--accent-2)" /> : null}
+        <KpiTile label="DistributorPool" value={`${formatAmount(summary.distributorPool)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="box" />
+        {!isKap20 ? <KpiTile label="OperationPool" value={`${formatAmount(summary.operationPool)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="target" sparkColor="var(--accent-3)" /> : null}
+        <KpiTile label="User Wallet" value={`${formatAmount(isKap20 ? summary.userWallet ?? '0' : summary.transferToUsers)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="users" sparkColor="var(--accent-2)" />
+        <KpiTile label={isKap20 ? 'Redemption (Burn)' : 'Burn Wallet'} value={`${formatAmount(isKap20 ? summary.redemptionBurn ?? '0' : summary.burn)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="refresh" sparkColor="var(--danger)" />
       </section>}
 
       {summary && !summary.reconciliationMatched ? <div className="mb-4" role="status">
@@ -333,6 +341,10 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
         </Card>
       </div>
 
+      {isKap20 && summary ? <Card className="mb-4 min-w-0 max-w-full" title="Point Token Transfer Performance" subtitle="Outgoing ICCYYN to Loyalty Swap or Workspace Wallet as a percentage of incoming ICCYYN from Initial Mint and Workspace wallets">
+        <PointTokenLockDonuts data={summary.pointTokenLocks ?? []} balanceSymbol={summary.token.symbol} />
+      </Card> : null}
+
       <div className="mb-4 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="min-w-0 max-w-full" title="Top 10 Users by Tokens Received" subtitle={`${selectedOption?.symbol ?? 'KAP-22'} · all-time pool transfers`}>
           {topUsersError ? <ErrorCard message={topUsersError} onRetry={() => selectedToken && void loadTopUsers(selectedToken)} /> : topUsersLoading || !topUsers ? <div className="h-[336px] shimmer rounded-xl" /> : topUsers.topReceived.length === 0 ? <div className="flex h-[336px] items-center justify-center text-center text-sm text-muted">No user transfers found</div> : <HorizontalBarChart data={topUsers.topReceived} symbol={topUsers.token.symbol} color="var(--accent)" ariaLabel={`Top 10 users by total ${topUsers.token.symbol} received`} />}
@@ -344,7 +356,7 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
 
       <Card className="min-w-0 max-w-full" title={`${reportLabel} Transactions`} subtitle={`${selectedOption?.name ?? 'Selected token'} · latest events first`} noPad>
         <div className="border-b border-default p-4 sm:p-5">
-          <label htmlFor="kap22-transaction-search" className="sr-only">Search KAP-22 transactions</label>
+          <label htmlFor="kap22-transaction-search" className="sr-only">Search {reportLabel} transactions</label>
           <div className="relative max-w-xl">
             <input id="kap22-transaction-search" type="search" className="input w-full pl-3 pr-24" value={searchInput} maxLength={128} placeholder="Search TxId, From or To wallet address" onChange={(event) => setSearchInput(event.target.value)} />
             {searchInput ? <button type="button" className="absolute right-10 top-1/2 -translate-y-1/2 text-xs text-muted hover:text-default" onClick={() => setSearchInput('')}>Clear</button> : null}
@@ -355,16 +367,16 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
         {tableError ? <div className="p-5"><ErrorCard message={tableError} onRetry={() => selectedToken && void loadTransactions(selectedToken, page, search)} /></div> : tableLoading || !transactions ? <div className="p-5"><SkeletonTable rows={7} /></div> : transactions.rows.length === 0 ? (
           <div className="py-16 text-center"><div className="text-sm font-medium text-default">No transactions found</div><p className="mt-1 text-xs text-muted">{search ? `No results match “${search}”.` : 'No events exist for this token in the selected workspace scope.'}</p>{search ? <button type="button" className="btn btn-ghost mt-4" onClick={() => setSearchInput('')}>Clear search</button> : null}</div>
         ) : <>
-          <div className="w-full min-w-0 max-w-full overflow-x-auto thin-scroll [contain:inline-size]" tabIndex={0} role="region" aria-label="Scrollable KAP-22 transaction table"><table className="min-w-[920px] w-full text-sm">
-            <caption className="sr-only">KAP-22 transaction events for {selectedOption?.name ?? 'the selected token'}</caption>
+          <div className="w-full min-w-0 max-w-full overflow-x-auto thin-scroll [contain:inline-size]" tabIndex={0} role="region" aria-label={`Scrollable ${reportLabel} transaction table`}><table className="min-w-[920px] w-full text-sm">
+            <caption className="sr-only">{reportLabel} transaction events for {selectedOption?.name ?? 'the selected token'}</caption>
             <thead><tr className="border-b border-default text-[10.5px] uppercase tracking-wider text-faint">
               <th scope="col" className="px-5 py-3 text-left font-medium">Transaction</th><th scope="col" className="px-3 py-3 text-left font-medium">Type</th><th scope="col" className="px-3 py-3 text-left font-medium">From</th><th scope="col" className="px-3 py-3 text-left font-medium">To</th><th scope="col" className="px-3 py-3 text-right font-medium">Amount</th><th scope="col" className="px-3 py-3 text-left font-medium">Time</th><th scope="col" className="px-3 py-3 text-left font-medium">Status</th>
             </tr></thead>
             <tbody>{transactions.rows.map((row) => <tr key={row.key || row.id} className="tbl-row border-b border-default last:border-0">
               <td className="px-5 py-3"><a href={`https://www.kubscan.com/tx/${encodeURIComponent(row.txId)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-mono text-xs text-default hover:text-accent" title={row.txId} aria-label={`Open transaction ${row.txId} on KubScan`}>{compactAddress(row.txId)}<Icon name="external" size={12} /></a><div className="mt-1 text-[10px] text-faint">{row.flow.replaceAll('_', ' ')}</div></td>
               <td className="px-3 py-3"><span className={`pill ${row.type === 'Mint' ? 'pill-success' : row.type === 'Burn' ? 'pill-danger' : 'pill-muted'}`}>{row.type}</span></td>
-              <td className="px-3 py-3"><a href={`https://www.kubscan.com/address/${encodeURIComponent(row.fromHash)}?tab=token_transfers`} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1.5 text-xs text-muted hover:text-accent ${row.fromName ? 'font-medium' : 'font-mono'}`} title={row.fromName ? `${row.fromName} — ${row.fromHash}` : row.fromHash} aria-label={`Open From wallet ${row.fromName ? `${row.fromName}, ` : ''}${row.fromHash} on KubScan`}>{row.fromName ?? compactAddress(row.fromHash)}<Icon name="external" size={12} /></a></td>
-              <td className="px-3 py-3"><a href={`https://www.kubscan.com/address/${encodeURIComponent(row.toHash)}?tab=token_transfers`} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1.5 text-xs text-muted hover:text-accent ${row.toName ? 'font-medium' : 'font-mono'}`} title={row.toName ? `${row.toName} — ${row.toHash}` : row.toHash} aria-label={`Open To wallet ${row.toName ? `${row.toName}, ` : ''}${row.toHash} on KubScan`}>{row.toName ?? compactAddress(row.toHash)}<Icon name="external" size={12} /></a></td>
+              <td className="px-3 py-3"><a href={`https://www.kubscan.com/address/${encodeURIComponent(row.fromHash)}?tab=token_transfers`} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1.5 text-xs text-muted hover:text-accent ${row.fromName ? 'font-medium' : 'font-mono'}`} title={row.fromName ? `${row.fromName} — ${row.fromHash}` : row.fromHash} aria-label={`Open From wallet ${row.fromName ? `${row.fromName}, ` : ''}${row.fromHash} on KubScan`}><Icon name={row.fromName ? 'gear' : 'user'} size={12} />{row.fromName ?? compactAddress(row.fromHash)}<Icon name="external" size={12} /></a></td>
+              <td className="px-3 py-3"><a href={`https://www.kubscan.com/address/${encodeURIComponent(row.toHash)}?tab=token_transfers`} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1.5 text-xs text-muted hover:text-accent ${row.toName ? 'font-medium' : 'font-mono'}`} title={row.toName ? `${row.toName} — ${row.toHash}` : row.toHash} aria-label={`Open To wallet ${row.toName ? `${row.toName}, ` : ''}${row.toHash} on KubScan`}><Icon name={row.toName ? 'gear' : 'user'} size={12} />{row.toName ?? compactAddress(row.toHash)}<Icon name="external" size={12} /></a></td>
               <td className="px-3 py-3 text-right"><span className="inline-flex items-center justify-end gap-2 font-mono text-xs text-default">{formatAmount(row.value)} {row.tokenSymbol}<TokenAvatar src={selectedOption?.imageUrl} symbol={row.tokenSymbol} size="sm" /></span></td>
               <td className="whitespace-nowrap px-3 py-3 text-xs text-muted">{formatTimestamp(row.timestamp, summary?.timezone ?? 'Asia/Bangkok')}</td>
               <td className="px-3 py-3"><span className={`pill ${['ok', 'success'].includes((row.status ?? '').toLowerCase()) ? 'pill-success' : 'pill-muted'}`}>{row.status ?? 'Unknown'}</span></td>

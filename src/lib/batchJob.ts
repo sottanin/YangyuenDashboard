@@ -208,14 +208,14 @@ interface TokenBalanceItem {
   value?: string
 }
 
-type BalanceField = 'balanceICC' | 'balanceGreen' | 'balanceTogether' | 'balanceIntegrity' | 'balanceFit'
+type BalanceField = 'ICCYYN' | 'FIT' | 'TGT' | 'INT' | 'GRN'
 
 const WALLET_BALANCE_FIELDS_BY_TOKEN_ADDRESS: Readonly<Record<string, BalanceField>> = {
-  [normalizeAddress(TOKEN_ADDRESSES.iccyyn)]: 'balanceICC',
-  [normalizeAddress(TOKEN_ADDRESSES.grn)]: 'balanceGreen',
-  [normalizeAddress(TOKEN_ADDRESSES.tgt)]: 'balanceTogether',
-  [normalizeAddress(TOKEN_ADDRESSES.int)]: 'balanceIntegrity',
-  [normalizeAddress(TOKEN_ADDRESSES.fit)]: 'balanceFit',
+  [normalizeAddress(TOKEN_ADDRESSES.iccyyn)]: 'ICCYYN',
+  [normalizeAddress(TOKEN_ADDRESSES.fit)]: 'FIT',
+  [normalizeAddress(TOKEN_ADDRESSES.tgt)]: 'TGT',
+  [normalizeAddress(TOKEN_ADDRESSES.int)]: 'INT',
+  [normalizeAddress(TOKEN_ADDRESSES.grn)]: 'GRN',
 }
 
 const CANONICAL_TOKEN_DECIMALS = 18
@@ -279,11 +279,11 @@ export function mapCanonicalTokenBalance(item: unknown):
 
 function zeroWalletBalances(): Record<BalanceField, Prisma.Decimal> {
   return {
-    balanceICC: new Prisma.Decimal(0),
-    balanceGreen: new Prisma.Decimal(0),
-    balanceTogether: new Prisma.Decimal(0),
-    balanceIntegrity: new Prisma.Decimal(0),
-    balanceFit: new Prisma.Decimal(0),
+    ICCYYN: new Prisma.Decimal(0),
+    FIT: new Prisma.Decimal(0),
+    TGT: new Prisma.Decimal(0),
+    INT: new Prisma.Decimal(0),
+    GRN: new Prisma.Decimal(0),
   }
 }
 
