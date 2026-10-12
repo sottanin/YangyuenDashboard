@@ -47,6 +47,11 @@ async function runBatch<T>(promises: (Promise<T> | null)[]): Promise<void> {
 
 async function main() {
   console.log('Starting seed...')
+  const seedSystemWorkspace = await prisma.workspace.upsert({
+    where: { name: 'SYSTEM' },
+    create: { name: 'SYSTEM', description: 'Canonical shared contracts and system wallets' },
+    update: {},
+  })
 
   // ─── Transactions.xlsx ───────────────────────────────────────────────────
   const txPath = path.join(process.cwd(), 'Transactions.xlsx')
@@ -173,8 +178,8 @@ async function main() {
       if (!name || !address) continue
       await prisma.tokenContract.upsert({
         where: { name },
-        create: { name, address },
-        update: { address },
+        create: { name, address, normalizedAddress: address.toLowerCase(), workspaceId: seedSystemWorkspace.id },
+        update: { address, normalizedAddress: address.toLowerCase() },
       })
     }
     console.log(`Inserted ${tokens.length} token contracts`)
@@ -190,8 +195,8 @@ async function main() {
       if (!name || !address) continue
       await prisma.addressContract.upsert({
         where: { name },
-        create: { name, address },
-        update: { address },
+        create: { name, address, normalizedAddress: address.toLowerCase() },
+        update: { address, normalizedAddress: address.toLowerCase() },
       })
     }
     console.log(`Inserted ${addrs.length} address contracts`)
@@ -298,13 +303,76 @@ async function main() {
     console.log(`Inserted ${instances.length} NFT instances`)
   }
 
-  // SystemConfig defaults
-  await prisma.systemConfig.upsert({
-    where: { key: 'batchCutoffDays' },
-    create: { key: 'batchCutoffDays', value: '7' },
+  // Canonical SYSTEM registry and reporting defaults. These are idempotent and
+  // intentionally preserve raw checksum casing while comparing lowercase.
+  const systemWorkspace = await prisma.workspace.upsert({
+    where: { name: 'SYSTEM' },
+    create: { name: 'SYSTEM', description: 'Canonical shared contracts and system wallets' },
     update: {},
   })
-  console.log('Seeded SystemConfig defaults')
+  const effectiveFrom = new Date('2025-10-29T14:02:37+07:00')
+  const canonicalTokens = [
+    { name: 'ICC-YANGYUEN', address: '0x176458708C6C5F91745E19683AbA93681e16110B', symbol: 'ICCYYN', standard: 'KAP-20', decimals: 18, role: 'PRIMARY_TOKEN' },
+    { name: 'Fit', address: '0x765fdD2333003814b8B0c132bC0f40bf90D55BB9', symbol: 'FIT', standard: 'KAP-22', decimals: 18, role: 'POINT_TOKEN' },
+    { name: 'Green', address: '0x3e19685894F822ec9E9caa752f459750a2B7ab44', symbol: 'GRN', standard: 'KAP-22', decimals: 18, role: 'POINT_TOKEN' },
+    { name: 'Integrity', address: '0x4E407c438bF2Cafc30e63dec17d77c9cc642cf93', symbol: 'INT', standard: 'KAP-22', decimals: 18, role: 'POINT_TOKEN' },
+    { name: 'Together', address: '0xB4c77F6c02b661750c4386d3D391167B4D443fF7', symbol: 'TGT', standard: 'KAP-22', decimals: 18, role: 'POINT_TOKEN' },
+    { name: 'Redemption NFT', address: '0xe089bc4b774b03f1D5F8C3f624603643F0718B62', symbol: 'NFT', standard: 'KAP-721', decimals: null, role: 'REDEMPTION_NFT' },
+  ]
+  for (const token of canonicalTokens) {
+    const normalizedAddress = token.address.toLowerCase()
+    const existing = await prisma.tokenContract.findFirst({ where: { normalizedAddress }, select: { id: true } })
+    if (existing) {
+      await prisma.tokenContract.update({
+        where: { id: existing.id },
+        data: { symbol: token.symbol, standard: token.standard, decimals: token.decimals, role: token.role, active: true, effectiveFrom, workspaceId: systemWorkspace.id },
+      })
+    } else {
+      const nameCollision = await prisma.tokenContract.findUnique({ where: { name: token.name }, select: { id: true } })
+      await prisma.tokenContract.create({
+        data: { ...token, name: nameCollision ? `${token.name} [${normalizedAddress.slice(2, 10)}]` : token.name, normalizedAddress, active: true, effectiveFrom, workspaceId: systemWorkspace.id },
+      })
+    }
+  }
+  const canonicalAddresses = [
+    { name: 'Zero Wallet', address: '0x0000000000000000000000000000000000000000', role: 'ZERO', version: null },
+    { name: 'Initial Mint Wallet', address: '0xCddFB85F74F48D7C90B4126e01007583503537fD', role: 'INITIAL_MINT', version: null },
+    { name: 'Main Wallet', address: '0xeDdF22523776d06B46DCc96768A8DfD01f5B1ff6', role: 'MAIN', version: null },
+    { name: 'Workspace Wallet', address: '0x11fa8Be7383AeD9549EB1693295F4a4A4B8C42AC', role: 'WORKSPACE', version: null },
+    { name: 'DistributorPool', address: '0xd8FF598242e87EA33055E2bAE38e5E7855206EA1', role: 'DISTRIBUTOR_POOL', version: null },
+    { name: 'OperationPool', address: '0x5375D9B6d9289F4b6c8C59734713764c4c1127D9', role: 'OPERATION_POOL', version: null },
+    { name: 'Loyalty Swap', address: '0x3270a1658E43fc5d7A0aE947A552cA916F76A05e', role: 'LOYALTY_SWAP', version: null },
+    { name: 'Loyalty Marketplace v1', address: '0x56ef6445CC79801b3a6b41319D996cFf8f901ac2', role: 'MARKETPLACE', version: 'v1' },
+    { name: 'Loyalty Marketplace v2', address: '0x032B2668EEf54b165A2D969Eab94f57d2bf546E4', role: 'MARKETPLACE', version: 'v2' },
+    { name: 'Loyalty Marketplace Fee', address: '0x2Dd756BEfD774AcB510a4389DBFDd34CBAeA1F0b', role: 'MARKETPLACE_FEE', version: null },
+  ]
+  for (const record of canonicalAddresses) {
+    const normalizedAddress = record.address.toLowerCase()
+    const existing = await prisma.addressContract.findFirst({ where: { normalizedAddress }, select: { id: true } })
+    if (existing) {
+      await prisma.addressContract.update({
+        where: { id: existing.id },
+        data: { role: record.role, version: record.version, active: true, effectiveFrom, workspaceId: systemWorkspace.id },
+      })
+    } else {
+      const nameCollision = await prisma.addressContract.findUnique({ where: { name: record.name }, select: { id: true } })
+      await prisma.addressContract.create({
+        data: { ...record, name: nameCollision ? `${record.name} [${normalizedAddress.slice(2, 10)}]` : record.name, normalizedAddress, active: true, effectiveFrom, workspaceId: systemWorkspace.id },
+      })
+    }
+  }
+  const configDefaults: Record<string, string> = {
+    reportingTimezone: 'Asia/Bangkok',
+    businessHistoryStart: '2025-10-29T14:02:37+07:00',
+    defaultReportRangeDays: '30',
+    aggregateMarketplaceVersions: 'true',
+    redemptionNftContract: '0xe089bc4b774b03f1D5F8C3f624603643F0718B62',
+    batchCutoffDays: '7',
+  }
+  for (const [key, value] of Object.entries(configDefaults)) {
+    await prisma.systemConfig.upsert({ where: { key }, create: { key, value }, update: {} })
+  }
+  console.log('Seeded canonical SYSTEM registry and SystemConfig defaults')
 
   console.log('Seed complete!')
 }

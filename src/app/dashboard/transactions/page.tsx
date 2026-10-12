@@ -1,13 +1,14 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { KpiTile } from '@/components/ui/KpiTile'
 import { AreaChart } from '@/components/charts/AreaChart'
 import { DonutChart } from '@/components/charts/DonutChart'
-import { SkeletonKpi, SkeletonCard, SkeletonTable } from '@/components/ui/SkeletonCard'
+import { SkeletonKpi } from '@/components/ui/SkeletonCard'
 import { Icon } from '@/components/ui/Icon'
+import { useWorkspace } from '@/lib/WorkspaceContext'
 
 interface TxRow {
   id: string
@@ -38,6 +39,7 @@ const STATUS_PILL: Record<string, string> = {
 }
 
 export default function TransactionsPage() {
+  const { selected } = useWorkspace()
   const [rows, setRows] = useState<TxRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -45,24 +47,36 @@ export default function TransactionsPage() {
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({ totalTx: 0, totalVolume: 0, avgFee: 0, failedCount: 0 })
 
-  const fetchTx = useCallback(async (p: number) => {
+  const requestId = useRef(0)
+
+  const fetchTx = useCallback(async (p: number, signal?: AbortSignal) => {
+    const id = ++requestId.current
     setLoading(true)
     try {
-      const res = await fetch(`/api/transactions?page=${p}&limit=20`)
+      const res = await fetch(`/api/transactions?page=${p}&limit=20&workspace=${encodeURIComponent(String(selected.id))}`, { signal })
+      if (!res.ok) throw new Error('Failed to load transactions')
       const data = await res.json()
+      if (id !== requestId.current) return
       setRows(data.transactions || [])
       setTotal(data.total || 0)
       setTotalPages(data.totalPages || 1)
     } catch {
+      if (signal?.aborted || id !== requestId.current) return
       setRows([])
     } finally {
-      setLoading(false)
+      if (id === requestId.current) setLoading(false)
     }
-  }, [])
+  }, [selected.id])
 
   useEffect(() => {
-    fetchTx(page)
-    fetch('/api/stats').then(r => r.json()).then(s => {
+    const controller = new AbortController()
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) void fetchTx(page, controller.signal)
+    })
+    fetch(`/api/stats?workspace=${encodeURIComponent(String(selected.id))}`, { signal: controller.signal }).then(r => {
+      if (!r.ok) throw new Error('Failed to load stats')
+      return r.json()
+    }).then(s => {
       setStats({
         totalTx: s.totalTransactions || 0,
         totalVolume: 0,
@@ -70,7 +84,8 @@ export default function TransactionsPage() {
         failedCount: 0,
       })
     }).catch(() => {})
-  }, [page, fetchTx])
+    return () => controller.abort()
+  }, [fetchTx, page, selected.id])
 
   const HOURLY = Array.from({ length: 24 }, (_, i) => ({
     label: `${i}:00`,

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useWorkspace } from '@/lib/WorkspaceContext'
 
 interface Workspace {
@@ -20,15 +20,33 @@ export default function WorkspacesPage() {
   const [deleting, setDeleting] = useState<number | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<Workspace | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const loadRequestId = useRef(0)
 
-  async function load() {
+  async function load(signal?: AbortSignal) {
+    const id = ++loadRequestId.current
     setLoading(true)
-    const res = await fetch('/api/workspaces')
-    setRows(await res.json())
-    setLoading(false)
+    try {
+      const res = await fetch('/api/workspaces', { signal })
+      if (!res.ok) throw new Error('Failed to load workspaces')
+      const data = await res.json()
+      if (id === loadRequestId.current) setRows(data)
+    } catch {
+      if (!signal?.aborted && id === loadRequestId.current) {
+        setRows([])
+        setError('Failed to load workspaces')
+      }
+    } finally {
+      if (id === loadRequestId.current) setLoading(false)
+    }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const controller = new AbortController()
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) void load(controller.signal)
+    })
+    return () => controller.abort()
+  }, [])
 
   function openAdd() {
     setForm({ name: '', description: '' })
@@ -68,7 +86,9 @@ export default function WorkspacesPage() {
       }
       setModal({ open: false, row: null })
       await load()
-      refreshContext()
+      await refreshContext()
+    } catch {
+      setError('Unable to save workspace')
     } finally {
       setSaving(false)
     }
@@ -76,15 +96,22 @@ export default function WorkspacesPage() {
 
   async function doDelete(row: Workspace) {
     setDeleting(row.id)
-    const res = await fetch(`/api/workspaces/${row.id}`, { method: 'DELETE' })
-    if (!res.ok) {
-      const d = await res.json()
-      setError(d.error || 'Delete failed')
+    setError(null)
+    try {
+      const res = await fetch(`/api/workspaces/${row.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const d = await res.json()
+        setError(d.error || 'Delete failed')
+        return
+      }
+      setConfirmDelete(null)
+      await load()
+      await refreshContext()
+    } catch {
+      setError('Unable to delete workspace')
+    } finally {
+      setDeleting(null)
     }
-    setDeleting(null)
-    setConfirmDelete(null)
-    await load()
-    refreshContext()
   }
 
   const canDelete = (row: Workspace) =>

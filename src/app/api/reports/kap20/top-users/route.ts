@@ -1,0 +1,5 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getCurrentAdmin, canAccessMenu, canAccessWorkspace } from '@/lib/auth/admin'
+import { getKap20TopUsers } from '@/lib/reporting/kap20Analysis'
+import { parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
+export async function GET(request: NextRequest): Promise<NextResponse> { const admin=await getCurrentAdmin(); if(!admin)return NextResponse.json({error:'Unauthorized'},{status:401}); if(!canAccessMenu(admin,'kap20-analysis'))return NextResponse.json({error:'Forbidden'},{status:403}); const params=request.nextUrl.searchParams; const workspace=parseWorkspaceSelection(params.get('workspace')); const token=params.get('token'); if(workspace===null||!token)return NextResponse.json({error:'Invalid parameters'},{status:400}); if(!canAccessWorkspace(admin,workspace))return NextResponse.json({error:'Workspace access denied'},{status:403}); const data=await getKap20TopUsers(token,workspace); return data?NextResponse.json(data):NextResponse.json({error:'Token not found'},{status:404}) }

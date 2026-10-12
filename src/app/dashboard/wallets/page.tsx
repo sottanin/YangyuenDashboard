@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { KpiTile } from '@/components/ui/KpiTile'
 import { BarChart } from '@/components/charts/BarChart'
 import { SkeletonKpi, SkeletonCard } from '@/components/ui/SkeletonCard'
 import { Icon } from '@/components/ui/Icon'
+import { useWorkspace } from '@/lib/WorkspaceContext'
 
 interface WalletRow {
   id: string
@@ -24,30 +25,41 @@ function trunc(s: string) {
 }
 
 export default function WalletsPage() {
+  const { selected } = useWorkspace()
   const [wallets, setWallets] = useState<WalletRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(true)
 
-  const fetchWallets = useCallback(async (p: number) => {
+  const requestId = useRef(0)
+
+  const fetchWallets = useCallback(async (p: number, signal?: AbortSignal) => {
+    const id = ++requestId.current
     setLoading(true)
     try {
-      const res = await fetch(`/api/wallets?page=${p}&limit=20`)
+      const res = await fetch(`/api/wallets?page=${p}&limit=20&workspace=${encodeURIComponent(String(selected.id))}`, { signal })
+      if (!res.ok) throw new Error('Failed to load wallets')
       const data = await res.json()
+      if (id !== requestId.current) return
       setWallets(data.wallets || [])
       setTotal(data.total || 0)
       setTotalPages(data.totalPages || 1)
     } catch {
+      if (signal?.aborted || id !== requestId.current) return
       setWallets([])
     } finally {
-      setLoading(false)
+      if (id === requestId.current) setLoading(false)
     }
-  }, [])
+  }, [selected.id])
 
   useEffect(() => {
-    fetchWallets(page)
-  }, [page, fetchWallets])
+    const controller = new AbortController()
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) void fetchWallets(page, controller.signal)
+    })
+    return () => controller.abort()
+  }, [fetchWallets, page])
 
   // Compute KPI values from wallets data
   const topICC = wallets.length > 0 ? Math.max(...wallets.map(w => parseFloat(w.balanceICC))) : 0

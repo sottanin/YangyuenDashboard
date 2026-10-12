@@ -13,6 +13,8 @@ interface AdminProfile {
   name: string
   email: string | null
   role: string
+  menuKeys: string[]
+  allWorkspaces: boolean
 }
 
 const PAGE_LABELS: Record<string, string> = {
@@ -20,6 +22,9 @@ const PAGE_LABELS: Record<string, string> = {
   '/dashboard/analytics': 'Analytics',
   '/dashboard/transactions': 'Transactions',
   '/dashboard/tokens': 'Tokens',
+  '/dashboard/kap22-analysis': 'KAP-22 Analysis',
+  '/dashboard/kap20-analysis': 'KAP-20 Analysis',
+  '/dashboard/roles': 'Roles',
   '/dashboard/wallets': 'Wallets',
   '/dashboard/reports': 'Reports',
   '/dashboard/settings': 'Settings',
@@ -35,8 +40,16 @@ export function DashboardShell({ children, admin }: { children: React.ReactNode;
   const [sidebarState, setSidebarState] = useState<SidebarState>('open')
 
   useEffect(() => {
-    const stored = (localStorage.getItem('nx-sidebar') as SidebarState) || 'open'
-    setSidebarState(stored)
+    let active = true
+    queueMicrotask(() => {
+      if (!active) return
+      const candidate = localStorage.getItem('nx-sidebar')
+      const stored: SidebarState = candidate === 'open' || candidate === 'narrow' || candidate === 'closed'
+        ? candidate
+        : 'open'
+      setSidebarState(stored)
+    })
+    return () => { active = false }
   }, [])
 
   const toggleSidebar = () => {
@@ -47,23 +60,26 @@ export function DashboardShell({ children, admin }: { children: React.ReactNode;
     })
   }
 
-  const sidebarMargin = sidebarState === 'closed' ? 0 : sidebarState === 'narrow' ? 68 : 240
+  const desktopSidebarClass = sidebarState === 'closed'
+    ? 'md:ml-0'
+    : sidebarState === 'narrow'
+      ? 'md:ml-[68px]'
+      : 'md:ml-[240px]'
   const currentPageLabel = PAGE_LABELS[pathname] || 'Dashboard'
 
   return (
-    <WorkspaceProvider>
+    <WorkspaceProvider allowAllWorkspaces={admin.allWorkspaces}>
       <div className="grid-bg" />
       <div className="ambient-bg" />
 
       <Sidebar state={sidebarState} admin={admin} />
 
       <main
-        className="relative z-10 transition-all duration-200 ease-out p-6 thin-scroll"
-        style={{ marginLeft: sidebarMargin + 'px', minHeight: '100vh' }}
+        className={`relative z-10 ml-0 min-h-screen min-w-0 max-w-full p-6 thin-scroll transition-all duration-200 ease-out ${desktopSidebarClass}`}
         data-density="comfortable"
       >
         <TopBar onToggleSidebar={toggleSidebar} currentPageLabel={currentPageLabel} admin={admin} />
-        <div className="animate-in">{children}</div>
+        <div className="min-w-0 max-w-full animate-in">{children}</div>
       </main>
     </WorkspaceProvider>
   )

@@ -26,12 +26,16 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/yangyuen_dashboard
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
+      TOKEN_IMAGE_DIR: /app/data/token-images
+    volumes:
+      - token_images:/app/data/token-images
     expose:
       - "3000"
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null || exit 1"]
       interval: 30s
@@ -63,6 +67,7 @@ services:
 volumes:
   postgres_data:
   migrate_node_modules:
+  token_images:
 
 networks:
   dashboard_internal:

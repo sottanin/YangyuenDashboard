@@ -38,6 +38,9 @@ services:
       AUTH_SECRET: ${AUTH_SECRET}
       # Optional: set initial superadmin password on first deploy; omit to auto-generate
       SUPERADMIN_INITIAL_PASSWORD: ${SUPERADMIN_INITIAL_PASSWORD:-}
+      TOKEN_IMAGE_DIR: /app/data/token-images
+    volumes:
+      - token_images:/app/data/token-images
     depends_on:
       postgres:
         condition: service_healthy   # wait for pg_isready before starting Next.js
@@ -45,3 +48,4 @@ services:
 
 volumes:
   postgres_data:
+  token_images:

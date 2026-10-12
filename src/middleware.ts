@@ -16,7 +16,11 @@ export async function middleware(request: NextRequest) {
   }
 
   const session = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value)
-  if (session) return NextResponse.next()
+  if (session) {
+    const headers = new Headers(request.headers)
+    headers.set('x-dashboard-pathname', pathname)
+    return NextResponse.next({ request: { headers } })
+  }
 
   if (pathname.startsWith('/api')) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

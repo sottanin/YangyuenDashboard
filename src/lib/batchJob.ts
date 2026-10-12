@@ -1,5 +1,6 @@
 import { prisma } from './prisma'
 import { Prisma } from '@prisma/client'
+import { isValidAddress, normalizeAddress, TOKEN_ADDRESSES } from './system/addresses'
 
 const KUBSCAN_BASE = 'https://www.kubscan.com/api/v2/tokens'
 const KUBSCAN_ADDR = 'https://www.kubscan.com/api/v2/addresses'
@@ -203,32 +204,113 @@ export async function runBatchJob(): Promise<void> {
 }
 
 interface TokenBalanceItem {
-  token: { address: string; name: string; symbol: string; decimals: string; type: string }
-  value: string
+  token?: { address?: string; name?: string; symbol?: string; decimals?: string; type?: string }
+  value?: string
 }
 
-function mapTokenNameToField(name: string): keyof typeof BALANCE_FIELDS | null {
-  const n = name.toLowerCase()
-  if (n.includes('icc')) return 'balanceICC'
-  if (n.includes('green')) return 'balanceGreen'
-  if (n.includes('together')) return 'balanceTogether'
-  if (n.includes('integrity')) return 'balanceIntegrity'
-  if (n.includes('fit')) return 'balanceFit'
-  return null
+type BalanceField = 'balanceICC' | 'balanceGreen' | 'balanceTogether' | 'balanceIntegrity' | 'balanceFit'
+
+const WALLET_BALANCE_FIELDS_BY_TOKEN_ADDRESS: Readonly<Record<string, BalanceField>> = {
+  [normalizeAddress(TOKEN_ADDRESSES.iccyyn)]: 'balanceICC',
+  [normalizeAddress(TOKEN_ADDRESSES.grn)]: 'balanceGreen',
+  [normalizeAddress(TOKEN_ADDRESSES.tgt)]: 'balanceTogether',
+  [normalizeAddress(TOKEN_ADDRESSES.int)]: 'balanceIntegrity',
+  [normalizeAddress(TOKEN_ADDRESSES.fit)]: 'balanceFit',
 }
 
-const BALANCE_FIELDS = {
-  balanceICC: true,
-  balanceGreen: true,
-  balanceTogether: true,
-  balanceIntegrity: true,
-  balanceFit: true,
+const CANONICAL_TOKEN_DECIMALS = 18
+const MAX_UINT256_DECIMAL_DIGITS = 78
+const MAX_TOKEN_BALANCE_RESPONSE_BYTES = 1_000_000
+const MAX_TOKEN_BALANCE_ITEMS = 10_000
+const WALLET_BALANCE_FETCH_TIMEOUT_MS = 15_000
+
+async function readTokenBalanceResponse(res: Response): Promise<TokenBalanceItem[]> {
+  const contentLength = res.headers.get('content-length')
+  if (contentLength !== null) {
+    const parsedLength = Number(contentLength)
+    if (Number.isFinite(parsedLength) && parsedLength > MAX_TOKEN_BALANCE_RESPONSE_BYTES) {
+      throw new Error('KubScan token-balance response is too large')
+    }
+  }
+
+  const body = await res.text()
+  if (body.length > MAX_TOKEN_BALANCE_RESPONSE_BYTES) {
+    throw new Error('KubScan token-balance response is too large')
+  }
+
+  const parsed: unknown = JSON.parse(body)
+  if (!Array.isArray(parsed) || parsed.length > MAX_TOKEN_BALANCE_ITEMS) {
+    throw new Error('KubScan returned an invalid token-balance response')
+  }
+  return parsed as TokenBalanceItem[]
+}
+
+export function mapCanonicalTokenBalance(item: unknown):
+  | { field: BalanceField; value: Prisma.Decimal }
+  | null {
+  if (typeof item !== 'object' || item === null) return null
+  const candidate = item as TokenBalanceItem
+  const address = candidate.token?.address
+  if (typeof address !== 'string') return null
+
+  const field = WALLET_BALANCE_FIELDS_BY_TOKEN_ADDRESS[normalizeAddress(address)]
+  if (!field) return null
+
+  const decimalsText = candidate.token?.decimals
+  if (typeof decimalsText !== 'string' || !/^\d+$/.test(decimalsText)) return null
+
+  const decimals = Number(decimalsText)
+  if (!Number.isSafeInteger(decimals) || decimals !== CANONICAL_TOKEN_DECIMALS) return null
+
+  const rawValue = candidate.value
+  if (typeof rawValue !== 'string') return null
+  const normalizedRawValue = rawValue.trim()
+  if (
+    normalizedRawValue.length === 0
+    || normalizedRawValue.length > MAX_UINT256_DECIMAL_DIGITS
+    || !/^\d+$/.test(normalizedRawValue)
+  ) return null
+
+  return {
+    field,
+    value: fromWei(normalizedRawValue, CANONICAL_TOKEN_DECIMALS),
+  }
+}
+
+function zeroWalletBalances(): Record<BalanceField, Prisma.Decimal> {
+  return {
+    balanceICC: new Prisma.Decimal(0),
+    balanceGreen: new Prisma.Decimal(0),
+    balanceTogether: new Prisma.Decimal(0),
+    balanceIntegrity: new Prisma.Decimal(0),
+    balanceFit: new Prisma.Decimal(0),
+  }
+}
+
+async function createWalletSyncLog(): Promise<{ id: string } | null> {
+  return prisma.$transaction(async (tx) => {
+    // Serializes the running-log check across requests without requiring a schema change.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(93422001)`
+
+    const running = await tx.batchJobLog.findFirst({
+      where: { status: 'running', tokenName: 'WalletSync' },
+      select: { id: true },
+    })
+    if (running) return null
+
+    return tx.batchJobLog.create({
+      data: { status: 'running', tokenName: 'WalletSync', tokenAddress: 'all' },
+      select: { id: true },
+    })
+  })
 }
 
 export async function runWalletSyncJob(): Promise<void> {
-  const log = await prisma.batchJobLog.create({
-    data: { status: 'running', tokenName: 'WalletSync', tokenAddress: 'all' },
-  })
+  const log = await createWalletSyncLog()
+  if (!log) {
+    console.warn('[WalletSync] Skipped because another wallet sync is already running')
+    return
+  }
 
   let totalFetched = 0
   let totalInserted = 0
@@ -244,77 +326,118 @@ export async function runWalletSyncJob(): Promise<void> {
       prisma.redemptionTransactionDetail.findMany({ select: { toHash: true }, distinct: ['toHash'] }),
     ])
 
-    const allWalletIds = new Set<string>(
-      [
-        ...txFroms.map(r => r.fromHash),
-        ...txTos.map(r => r.toHash),
-        ...rdmFroms.map(r => r.fromHash),
-        ...rdmTos.map(r => r.toHash),
-      ].filter(id => id && id !== 'unknown')
-    )
+    // Comparisons are case-insensitive, while the first raw/checksum spelling is
+    // retained for display and KubScan requests.
+    const allWalletIds = new Map<string, string>()
+    const rawWalletIds = [
+      ...txFroms.map(r => r.fromHash),
+      ...txTos.map(r => r.toHash),
+      ...rdmFroms.map(r => r.fromHash),
+      ...rdmTos.map(r => r.toHash),
+    ]
+    for (const walletId of rawWalletIds) {
+      if (!walletId || walletId.toLowerCase() === 'unknown') continue
+      const normalizedWalletId = normalizeAddress(walletId)
+      if (!allWalletIds.has(normalizedWalletId)) allWalletIds.set(normalizedWalletId, walletId)
+    }
 
     console.log(`[WalletSync] Found ${allWalletIds.size} unique wallet addresses`)
 
     // Upsert wallet IDs — insert new ones, skip existing
-    for (const walletId of allWalletIds) {
-      const existing = await prisma.wallet.findUnique({ where: { walletId } })
+    for (const walletId of allWalletIds.values()) {
+      const existing = await prisma.wallet.findFirst({
+        where: { walletId: { equals: walletId, mode: 'insensitive' } },
+        select: { id: true },
+      })
       if (!existing) {
         await prisma.wallet.create({ data: { walletId } })
         totalInserted++
-        console.log(`[WalletSync] Inserted new wallet: ${walletId}`)
+        console.log('[WalletSync] Inserted new wallet record')
       }
     }
 
-    // Reset ALL wallet balances to zero before fresh fetch
-    await prisma.wallet.updateMany({
-      data: {
-        balanceICC: new Prisma.Decimal(0),
-        balanceGreen: new Prisma.Decimal(0),
-        balanceTogether: new Prisma.Decimal(0),
-        balanceIntegrity: new Prisma.Decimal(0),
-        balanceFit: new Prisma.Decimal(0),
-      },
-    })
-    console.log('[WalletSync] Reset all wallet balances to zero')
-
-    // Fetch and update balances for all wallets
-    const allWallets = await prisma.wallet.findMany()
+    // Fetch a complete snapshot before changing any balances. This prevents a transient
+    // KubScan failure or cancellation from leaving every wallet partially reset to zero.
+    const walletRows = await prisma.wallet.findMany({ orderBy: { id: 'asc' } })
+    const uniqueWallets = new Map<string, (typeof walletRows)[number]>()
+    for (const wallet of walletRows) {
+      const normalizedWalletId = normalizeAddress(wallet.walletId)
+      if (!uniqueWallets.has(normalizedWalletId)) uniqueWallets.set(normalizedWalletId, wallet)
+    }
+    const allWallets = [...uniqueWallets.values()]
     totalFetched = allWallets.length
     console.log(`[WalletSync] Fetching balances for ${totalFetched} wallets`)
 
+    const snapshots = new Map<string, Record<BalanceField, Prisma.Decimal>>()
+
     for (const wallet of allWallets) {
+      const currentLog = await prisma.batchJobLog.findUnique({
+        where: { id: log.id },
+        select: { status: true },
+      })
+      if (currentLog?.status !== 'running') {
+        throw new Error('Wallet sync was cancelled')
+      }
+
       try {
-        const res = await fetch(`${KUBSCAN_ADDR}/${wallet.walletId}/token-balances`)
-        if (!res.ok) {
-          console.warn(`[WalletSync] Failed to fetch balance for ${wallet.walletId}: HTTP ${res.status}`)
-          errorCount++
+        if (!isValidAddress(wallet.walletId)) {
+          // Dirty legacy identifiers cannot be queried safely. Keep them in the atomic
+          // reset snapshot, but do not let one malformed row block all valid wallets.
+          snapshots.set(wallet.walletId, zeroWalletBalances())
+          console.warn('[WalletSync] Reset invalid legacy wallet identifier')
           continue
         }
 
-        const balances: TokenBalanceItem[] = await res.json()
-        if (!Array.isArray(balances) || balances.length === 0) continue
+        const res = await fetch(
+          `${KUBSCAN_ADDR}/${encodeURIComponent(wallet.walletId)}/token-balances`,
+          { signal: AbortSignal.timeout(WALLET_BALANCE_FETCH_TIMEOUT_MS) },
+        )
+        if (!res.ok) {
+          throw new Error(`KubScan returned HTTP ${res.status}`)
+        }
 
-        const update: Partial<Record<keyof typeof BALANCE_FIELDS, Prisma.Decimal>> = {}
+        const balances = await readTokenBalanceResponse(res)
+        const update = zeroWalletBalances()
 
         for (const item of balances) {
-          const field = mapTokenNameToField(item.token?.name ?? '')
-          if (!field) continue
-          const decimals = parseInt(item.token?.decimals ?? '18', 10)
-          const rawValue = item.value ?? '0'
-          const value = new Prisma.Decimal(rawValue).div(new Prisma.Decimal(10).pow(decimals))
-          update[field] = value
+          const mapped = mapCanonicalTokenBalance(item)
+          if (!mapped) continue
+          update[mapped.field] = mapped.value
         }
-
-        if (Object.keys(update).length > 0) {
-          await prisma.wallet.update({ where: { walletId: wallet.walletId }, data: update })
-          totalUpdated++
-          console.log(`[WalletSync] Updated balances for ${wallet.walletId}`)
-        }
+        snapshots.set(wallet.walletId, update)
       } catch (err) {
-        console.error(`[WalletSync] Error processing wallet ${wallet.walletId}:`, err)
+        console.error('[WalletSync] Error processing wallet balance:', err)
         errorCount++
       }
     }
+
+    if (errorCount > 0) {
+      throw new Error(`Wallet snapshot aborted because ${errorCount} balance request(s) failed`)
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // Serialize the final commit with another start/check and honor manual cancellation.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(93422001)`
+      const currentLog = await tx.batchJobLog.findUnique({
+        where: { id: log.id },
+        select: { status: true },
+      })
+      if (currentLog?.status !== 'running') {
+        throw new Error('Wallet sync was cancelled before balances were committed')
+      }
+
+      // Every snapshot already starts with all canonical balances at zero. Apply
+      // those complete snapshots only to the wallets that were fetched by this
+      // run. A table-wide reset here could erase a wallet inserted concurrently
+      // after the fetch phase even though no KubScan snapshot was obtained for it.
+      for (const [walletId, balances] of snapshots) {
+        const result = await tx.wallet.updateMany({
+          where: { walletId: { equals: walletId, mode: 'insensitive' } },
+          data: balances,
+        })
+        totalUpdated += result.count
+      }
+    }, { maxWait: 10_000, timeout: 300_000 })
 
     console.log(`[WalletSync] Done — inserted:${totalInserted} updated:${totalUpdated} errors:${errorCount}`)
 
@@ -332,8 +455,8 @@ export async function runWalletSyncJob(): Promise<void> {
     })
   } catch (err) {
     console.error('[WalletSync] Fatal error:', err)
-    await prisma.batchJobLog.update({
-      where: { id: log.id },
+    await prisma.batchJobLog.updateMany({
+      where: { id: log.id, status: 'running' },
       data: {
         finishedAt: new Date(),
         status: 'failed',

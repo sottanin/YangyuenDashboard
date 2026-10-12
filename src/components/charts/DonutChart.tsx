@@ -18,18 +18,19 @@ interface DonutChartProps {
 
 export function DonutChart({ data, size = 220, thickness = 28, centerLabel, centerValue }: DonutChartProps) {
   const [hover, setHover] = useState<number | null>(null)
-  const total = data.reduce((s, d) => s + d.value, 0)
+  const values = data.map((item) => Number.isFinite(item.value) && item.value > 0 ? item.value : 0)
+  const total = values.reduce((sum, value) => sum + value, 0)
   const r = size / 2 - 4
-  const innerR = r - thickness
+  const innerR = Math.max(1, r - Math.max(1, Math.min(thickness, r - 1)))
   const cx = size / 2
   const cy = size / 2
+  const hoveredItem = hover === null ? null : data[hover] ?? null
 
-  let cumAngle = -Math.PI / 2
-  const arcs = data.map((d) => {
-    const angle = (d.value / (total || 1)) * Math.PI * 2
-    const startA = cumAngle
-    const endA = cumAngle + angle
-    cumAngle = endA
+  const arcs = data.map((d, index) => {
+    const angle = (values[index] / (total || 1)) * Math.PI * 2
+    const precedingValue = values.slice(0, index).reduce((sum, value) => sum + value, 0)
+    const startA = -Math.PI / 2 + (precedingValue / (total || 1)) * Math.PI * 2
+    const endA = startA + angle
     const large = angle > Math.PI ? 1 : 0
     const x1 = cx + Math.cos(startA) * r
     const y1 = cy + Math.sin(startA) * r
@@ -39,9 +40,12 @@ export function DonutChart({ data, size = 220, thickness = 28, centerLabel, cent
     const y3 = cy + Math.sin(endA) * innerR
     const x4 = cx + Math.cos(startA) * innerR
     const y4 = cy + Math.sin(startA) * innerR
+    const fullRing = angle >= Math.PI * 2 - Number.EPSILON
+      ? `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx} ${cy + r} A ${r} ${r} 0 1 1 ${cx} ${cy - r} L ${cx} ${cy - innerR} A ${innerR} ${innerR} 0 1 0 ${cx} ${cy + innerR} A ${innerR} ${innerR} 0 1 0 ${cx} ${cy - innerR} Z`
+      : null
     return {
       ...d,
-      path: `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${innerR} ${innerR} 0 ${large} 0 ${x4} ${y4} Z`,
+      path: values[index] === 0 ? '' : fullRing ?? `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${innerR} ${innerR} 0 ${large} 0 ${x4} ${y4} Z`,
     }
   })
 
@@ -49,6 +53,9 @@ export function DonutChart({ data, size = 220, thickness = 28, centerLabel, cent
     <div className="flex items-center gap-6">
       <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
         <svg width={size} height={size}>
+          {total === 0 && (
+            <circle cx={cx} cy={cy} r={(r + innerR) / 2} fill="none" stroke="rgb(148 163 184 / 0.2)" strokeWidth={r - innerR} />
+          )}
           {arcs.map((a, i) => (
             <path key={i} d={a.path}
               fill={a.color}
@@ -60,9 +67,9 @@ export function DonutChart({ data, size = 220, thickness = 28, centerLabel, cent
           ))}
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <div className="text-xs text-muted">{hover !== null ? data[hover].label : centerLabel}</div>
+          <div className="text-xs text-muted">{hoveredItem ? hoveredItem.label : centerLabel}</div>
           <div className="text-2xl font-semibold tracking-tight">
-            {hover !== null ? `${data[hover].value}%` : centerValue}
+            {hoveredItem ? `${hoveredItem.value}%` : centerValue}
           </div>
         </div>
       </div>

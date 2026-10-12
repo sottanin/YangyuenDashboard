@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
-import { ensureDefaultSuperAdmin, getCurrentAdmin } from '@/lib/auth/admin'
+import { canAccessMenu, ensureDefaultSuperAdmin, getCurrentAdmin, isSuperAdmin } from '@/lib/auth/admin'
 import { hashPassword } from '@/lib/auth/password'
 import { prisma } from '@/lib/prisma'
-
-const ROLES = ['admin', 'superadmin']
 
 function serializeAdmin(user: {
   id: string
@@ -16,6 +14,8 @@ function serializeAdmin(user: {
   lastLoginAt: Date | null
   createdAt: Date
   updatedAt: Date
+  roles: Array<{ role: { id: string; name: string } }>
+  workspaces: Array<{ workspace: { id: number; name: string } }>
 }) {
   return user
 }
@@ -23,6 +23,7 @@ function serializeAdmin(user: {
 export async function GET() {
   const currentAdmin = await getCurrentAdmin()
   if (!currentAdmin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!canAccessMenu(currentAdmin, 'admin-users')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   await ensureDefaultSuperAdmin()
   const users = await prisma.adminUser.findMany({
@@ -37,6 +38,8 @@ export async function GET() {
       lastLoginAt: true,
       createdAt: true,
       updatedAt: true,
+      roles: { select: { role: { select: { id: true, name: true } } } },
+      workspaces: { select: { workspace: { select: { id: true, name: true } } } },
     },
   })
 
@@ -46,7 +49,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const currentAdmin = await getCurrentAdmin()
   if (!currentAdmin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (currentAdmin.role !== 'superadmin') {
+  if (!isSuperAdmin(currentAdmin)) {
     return NextResponse.json({ error: 'Only superadmin can create admin users' }, { status: 403 })
   }
 
@@ -55,34 +58,44 @@ export async function POST(req: NextRequest) {
       username?: string
       name?: string
       email?: string
-      role?: string
+      roleIds?: string[]
+      workspaceIds?: number[]
       password?: string
       active?: boolean
     }
     const username = body.username?.trim()
     const name = body.name?.trim()
     const email = body.email?.trim() || null
-    const role = body.role || 'admin'
+    if (!Array.isArray(body.roleIds) || !body.roleIds.every((value) => typeof value === 'string')) return NextResponse.json({ error: 'Invalid role selection' }, { status: 400 })
+    if (!Array.isArray(body.workspaceIds) || !body.workspaceIds.every((value) => Number.isSafeInteger(value) && value > 0)) return NextResponse.json({ error: 'Invalid workspace selection' }, { status: 400 })
+    const roleIds = Array.from(new Set(body.roleIds))
+    const workspaceIds = Array.from(new Set(body.workspaceIds))
     const password = body.password || ''
 
     if (!username || !name || !password) {
       return NextResponse.json({ error: 'Username, name, and password are required' }, { status: 400 })
     }
-    if (!ROLES.includes(role)) {
-      return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
-    }
+    if (roleIds.length === 0) return NextResponse.json({ error: 'Select at least one role' }, { status: 400 })
     if (password.length < 8) {
       return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 })
     }
 
+    const selectedRoles = await prisma.adminRole.findMany({ where: { id: { in: roleIds } } })
+    if (selectedRoles.length !== roleIds.length) return NextResponse.json({ error: 'Invalid role selection' }, { status: 400 })
+    const isSuper = selectedRoles.some((item) => item.name === 'Superadmin')
+    if (!isSuper && workspaceIds.length === 0) return NextResponse.json({ error: 'Select at least one workspace' }, { status: 400 })
+    const workspaceCount = await prisma.workspace.count({ where: { id: { in: workspaceIds } } })
+    if (!isSuper && workspaceCount !== workspaceIds.length) return NextResponse.json({ error: 'Invalid workspace selection' }, { status: 400 })
     const user = await prisma.adminUser.create({
       data: {
         username,
         name,
         email,
-        role,
+        role: isSuper ? 'superadmin' : 'admin',
         active: body.active ?? true,
         passwordHash: hashPassword(password),
+        roles: { create: roleIds.map((roleId) => ({ roleId })) },
+        workspaces: { create: isSuper ? [] : workspaceIds.map((workspaceId) => ({ workspaceId })) },
       },
       select: {
         id: true,
@@ -94,6 +107,8 @@ export async function POST(req: NextRequest) {
         lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
+      roles: { select: { role: { select: { id: true, name: true } } } },
+      workspaces: { select: { workspace: { select: { id: true, name: true } } } },
       },
     })
 

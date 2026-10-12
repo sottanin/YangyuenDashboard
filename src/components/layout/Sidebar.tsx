@@ -1,9 +1,11 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { Icon } from '@/components/ui/Icon'
 import { useWorkspace } from '@/lib/WorkspaceContext'
+import { MENU_CATALOG } from '@/lib/auth/menuCatalog'
 
 type SidebarState = 'open' | 'narrow' | 'closed'
 
@@ -14,38 +16,9 @@ interface SidebarProps {
     email: string | null
     username: string
     role: string
+    menuKeys: string[]
   }
 }
-
-const NAV = [
-  {
-    section: 'Workspace',
-    items: [
-      { id: 'overview', label: 'Overview', icon: 'home', href: '/dashboard' },
-      { id: 'analytics', label: 'Analytics', icon: 'bar', href: '/dashboard/analytics' },
-      { id: 'reports', label: 'Reports', icon: 'doc', href: '/dashboard/reports' },
-    ],
-  },
-  {
-    section: 'Blockchain',
-    items: [
-      { id: 'transactions', label: 'Transactions', icon: 'cart', href: '/dashboard/transactions', badge: 'Live' },
-      { id: 'redemptions', label: 'Redemptions', icon: 'refresh', href: '/dashboard/redemptions' },
-      { id: 'tokens', label: 'Tokens', icon: 'box', href: '/dashboard/tokens' },
-      { id: 'wallets', label: 'Wallets', icon: 'users', href: '/dashboard/wallets' },
-    ],
-  },
-  {
-    section: 'System',
-    items: [
-      { id: 'batch-logs', label: 'Batch Logs', icon: 'refresh', href: '/dashboard/batch-logs', badge: 'Job' },
-      { id: 'contracts',  label: 'Contracts',  icon: 'doc',     href: '/dashboard/contracts' },
-      { id: 'workspaces', label: 'Workspaces', icon: 'target',  href: '/dashboard/workspaces' },
-      { id: 'admin-users', label: 'Admin Users', icon: 'users', href: '/dashboard/admin-users' },
-      { id: 'settings',   label: 'Settings',   icon: 'gear',    href: '/dashboard/settings' },
-    ],
-  },
-]
 
 export function Sidebar({ state, admin }: SidebarProps) {
   const pathname = usePathname()
@@ -60,10 +33,12 @@ export function Sidebar({ state, admin }: SidebarProps) {
 
   const wsLabel = selected.id === 'all' ? 'All Workspaces' : selected.name
   const wsInitials = selected.id === 'all' ? '∞' : selected.name.slice(0, 2).toUpperCase()
+  const visibleMenus = MENU_CATALOG.filter((menu) => admin.menuKeys.includes('*') || admin.menuKeys.includes(menu.key))
+  const sections = ['Workspace', 'Blockchain', 'System'].map((section) => ({ section, items: visibleMenus.filter((menu) => menu.section === section) })).filter((section) => section.items.length > 0)
 
   return (
     <aside
-      className={`fixed left-0 top-0 bottom-0 z-30 transition-all duration-200 ease-out ${
+      className={`fixed left-0 top-0 bottom-0 z-30 hidden transition-all duration-200 ease-out md:block ${
         isNarrow ? 'w-[68px] sidebar-narrow' : 'w-[240px]'
       }`}
     >
@@ -71,7 +46,7 @@ export function Sidebar({ state, admin }: SidebarProps) {
         {/* Logo */}
         <div className={`flex items-center gap-2.5 px-2 py-3 mb-2 ${isNarrow ? 'justify-center' : ''}`}>
           <div className="w-8 h-8 flex-shrink-0">
-            <img src="/logo-fullcolor.svg" alt="Yangyuen" className="w-full h-full object-contain" />
+            <Image src="/logo-fullcolor.svg" alt="Yangyuen" width={32} height={32} className="w-full h-full object-contain" />
           </div>
           {!isNarrow && (
             <div>
@@ -100,14 +75,14 @@ export function Sidebar({ state, admin }: SidebarProps) {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto thin-scroll">
-          {NAV.map((section) => (
+          {sections.map((section) => (
             <div key={section.section} className="mb-3">
               <div className="nav-section-label text-[10px] uppercase tracking-wider text-faint px-2 mb-1.5 font-medium">
                 {section.section}
               </div>
               {section.items.map((item) => (
                 <Link
-                  key={item.id}
+                  key={item.key}
                   href={item.href}
                   className={`nav-item ${isActive(item.href) ? 'active' : ''}`}
                   title={isNarrow ? item.label : undefined}

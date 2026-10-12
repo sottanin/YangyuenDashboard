@@ -1,5 +1,6 @@
 import { Sparkline } from '@/components/charts/Sparkline'
 import { Icon } from './Icon'
+import type { ReactNode } from 'react'
 
 interface KpiTileProps {
   label: string
@@ -9,9 +10,10 @@ interface KpiTileProps {
   sparkColor?: string
   icon?: string
   iconBg?: string
+  valueTrailing?: ReactNode
 }
 
-export function KpiTile({ label, value, change, spark, sparkColor = 'var(--accent)', icon, iconBg }: KpiTileProps) {
+export function KpiTile({ label, value, change, spark, sparkColor = 'var(--accent)', icon, iconBg, valueTrailing }: KpiTileProps) {
   const positive = (change ?? 0) >= 0
   return (
     <div className="glass rounded-2xl p-5 relative overflow-hidden density-card">
@@ -26,7 +28,7 @@ export function KpiTile({ label, value, change, spark, sparkColor = 'var(--accen
           </div>
         )}
       </div>
-      <div className="text-2xl font-semibold tracking-tight text-default">{value}</div>
+      <div className="flex min-w-0 items-center gap-2 text-2xl font-semibold tracking-tight text-default"><span className="min-w-0 truncate">{value}</span>{valueTrailing}</div>
       <div className="flex items-end justify-between mt-3">
         {change != null ? (
           <div className={`pill ${positive ? 'pill-success' : 'pill-danger'}`}>

@@ -1,35 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
+import { getWorkspaceReportScope, parseWorkspaceSelection, tokenScopeFilter } from '@/lib/reporting/workspaceScope'
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url)
-    const workspaceParam = searchParams.get('workspace')
+    const admin = await getCurrentAdmin()
+    if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!canAccessMenu(admin, 'analytics')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const selection = parseWorkspaceSelection(new URL(req.url).searchParams.get('workspace'))
+    if (selection === null) return NextResponse.json({ error: 'Invalid workspace' }, { status: 400 })
+    if (!canAccessWorkspace(admin, selection)) return NextResponse.json({ error: 'Workspace access denied' }, { status: 403 })
 
     const sevenDaysAgo = new Date()
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
 
-    let tokenAddressFilter: { tokenAddress: { in: string[] } } | undefined
-    if (workspaceParam && workspaceParam !== 'all') {
-      const wsId = parseInt(workspaceParam)
-      if (!isNaN(wsId)) {
-        const systemWs = await prisma.workspace.findUnique({ where: { name: 'SYSTEM' } })
-        const contracts = await prisma.tokenContract.findMany({
-          where: {
-            OR: [
-              { workspaceId: wsId },
-              ...(systemWs ? [{ workspaceId: systemWs.id }] : []),
-            ],
-          },
-          select: { address: true },
-        })
-        tokenAddressFilter = { tokenAddress: { in: contracts.map((c) => c.address) } }
-      }
-    }
+    const scope = await getWorkspaceReportScope(selection)
 
     const transactions = await prisma.transactionDetail.findMany({
       select: { timestamp: true },
-      where: { timestamp: { gte: sevenDaysAgo }, ...tokenAddressFilter },
+      where: { timestamp: { gte: sevenDaysAgo }, ...tokenScopeFilter(scope.tokenAddresses) },
     })
 
     const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0))

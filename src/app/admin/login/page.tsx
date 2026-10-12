@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { SESSION_COOKIE, verifySessionToken } from '@/lib/auth/session'
 import { LoginForm } from './LoginForm'
+import Image from 'next/image'
 
 export default async function AdminLoginPage() {
   const cookieStore = await cookies()
@@ -18,7 +19,7 @@ export default async function AdminLoginPage() {
           <div className="w-full max-w-md glass-strong rounded-2xl p-6 shadow-lg">
             <div className="mb-6">
               <div className="mb-4">
-                <img src="/logo-fullcolor.svg" alt="Yangyuen" className="h-10 w-auto" />
+                <Image src="/logo-fullcolor.svg" alt="Yangyuen" width={160} height={40} className="h-10 w-auto" priority />
               </div>
               <h1 className="text-2xl font-semibold tracking-tight text-default">Yangyuen Data Analysis</h1>
               <p className="text-sm text-muted mt-1">Sign in to access the analytics dashboard.</p>

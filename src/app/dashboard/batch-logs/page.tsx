@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 
 interface BatchJobLog {
   id: string
@@ -53,22 +53,43 @@ export default function BatchLogsPage() {
   const [selected, setSelected] = useState<Set<JobKey>>(new Set(ALL_KEYS))
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null)
   const limit = 20
+  const requestId = useRef(0)
 
-  const fetchLogs = useCallback(async () => {
-    const res = await fetch(`/api/batch/logs?page=${page}&limit=${limit}`)
-    const data = await res.json()
-    setLogs(data.logs)
-    setTotal(data.total)
-    setLoading(false)
+  const fetchLogs = useCallback(async (signal?: AbortSignal) => {
+    const id = ++requestId.current
+    try {
+      const res = await fetch(`/api/batch/logs?page=${page}&limit=${limit}`, { signal })
+      if (!res.ok) throw new Error('Failed to load batch logs')
+      const data = await res.json()
+      if (id !== requestId.current) return
+      setLogs(data.logs ?? [])
+      setTotal(data.total ?? 0)
+    } catch {
+      if (signal?.aborted || id !== requestId.current) return
+      setLogs([])
+      setTotal(0)
+    } finally {
+      if (id === requestId.current) setLoading(false)
+    }
   }, [page])
 
-  useEffect(() => { fetchLogs() }, [fetchLogs])
+  useEffect(() => {
+    const controller = new AbortController()
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) void fetchLogs(controller.signal)
+    })
+    return () => controller.abort()
+  }, [fetchLogs])
 
   useEffect(() => {
     const hasRunning = logs.some((l) => l.status === 'running')
     if (!hasRunning) return
-    const timer = setInterval(fetchLogs, 5000)
-    return () => clearInterval(timer)
+    const controller = new AbortController()
+    const timer = setInterval(() => { void fetchLogs(controller.signal) }, 5000)
+    return () => {
+      clearInterval(timer)
+      controller.abort()
+    }
   }, [logs, fetchLogs])
 
   function showToast(msg: string, type: 'ok' | 'err') {
@@ -79,7 +100,8 @@ export default function BatchLogsPage() {
   function toggleJob(key: JobKey) {
     setSelected((prev) => {
       const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
@@ -100,7 +122,8 @@ export default function BatchLogsPage() {
         body,
       })
       const data = await res.json()
-      res.ok ? showToast(data.message, 'ok') : showToast(data.message || data.error, 'err')
+      if (res.ok) showToast(data.message, 'ok')
+      else showToast(data.message || data.error, 'err')
       if (res.ok) fetchLogs()
     } catch {
       showToast('Network error', 'err')

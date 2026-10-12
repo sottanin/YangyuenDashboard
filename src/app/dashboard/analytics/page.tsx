@@ -7,7 +7,7 @@ import { KpiTile } from '@/components/ui/KpiTile'
 import { BarChart } from '@/components/charts/BarChart'
 import { Heatmap } from '@/components/charts/Heatmap'
 import { ScatterChart } from '@/components/charts/ScatterChart'
-import { SkeletonKpi, SkeletonCard } from '@/components/ui/SkeletonCard'
+import { SkeletonKpi } from '@/components/ui/SkeletonCard'
 import { Icon } from '@/components/ui/Icon'
 
 interface VolumeData { label: string; mint: number; transfer: number; total: number }
@@ -33,10 +33,20 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    const controller = new AbortController()
     Promise.all([
-      fetch('/api/charts/volume').then((r) => r.json()),
-      fetch('/api/charts/heatmap').then((r) => r.json()),
-      fetch('/api/stats').then((r) => r.json()),
+      fetch('/api/charts/volume', { signal: controller.signal }).then((r) => {
+        if (!r.ok) throw new Error('Failed to load volume')
+        return r.json()
+      }),
+      fetch('/api/charts/heatmap', { signal: controller.signal }).then((r) => {
+        if (!r.ok) throw new Error('Failed to load heatmap')
+        return r.json()
+      }),
+      fetch('/api/stats', { signal: controller.signal }).then((r) => {
+        if (!r.ok) throw new Error('Failed to load stats')
+        return r.json()
+      }),
     ]).then(([vol, heat, statsRes]) => {
       if (vol.volume) setVolumeData(vol.volume)
       if (heat.heatmap) setHeatmapData(heat.heatmap)
@@ -47,13 +57,17 @@ export default function AnalyticsPage() {
         burnCount: statsRes.totalRedemptions || 0,
       })
     }).catch(() => {
+      if (controller.signal.aborted) return
       // fallback
       const fallback = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((l, i) => ({
         label: l, mint: 80 + i * 12, transfer: 200 + i * 25, total: 280 + i * 37,
       }))
       setVolumeData(fallback)
       setHeatmapData(Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => Math.floor(Math.random() * 80))))
-    }).finally(() => setLoading(false))
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false)
+    })
+    return () => controller.abort()
   }, [])
 
   if (loading) return (

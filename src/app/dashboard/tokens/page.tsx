@@ -6,6 +6,8 @@ import { Card } from '@/components/ui/Card'
 import { Sparkline } from '@/components/charts/Sparkline'
 import { SkeletonCard } from '@/components/ui/SkeletonCard'
 import { Icon } from '@/components/ui/Icon'
+import Image from 'next/image'
+import { useWorkspace } from '@/lib/WorkspaceContext'
 
 interface TokenData {
   id: string
@@ -54,21 +56,55 @@ function trunc(s: string, n = 16) {
   return s.slice(0, 8) + '...' + s.slice(-6)
 }
 
+function NftImage({ nft }: { nft: NFTInstance }) {
+  const [failed, setFailed] = useState(false)
+
+  if (!nft.imageUrl || failed) {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted" role="img" aria-label={`${nft.name} image unavailable`}>
+        <span className="text-4xl" aria-hidden="true">🍱</span>
+        {failed && <span className="text-[10px]">Image unavailable</span>}
+      </div>
+    )
+  }
+
+  return (
+    <Image
+      src={nft.imageUrl.replace('ipfs://', 'https://ipfs.io/ipfs/')}
+      alt={nft.name}
+      fill
+      unoptimized
+      sizes="(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+      className="object-cover"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
 export default function TokensPage() {
+  const { selected, loading: workspaceLoading } = useWorkspace()
   const [tokens, setTokens] = useState<TokenData[]>([])
   const [nftInstances, setNftInstances] = useState<NFTInstance[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/tokens')
-      .then((r) => r.json())
+    if (workspaceLoading) return
+    const controller = new AbortController()
+    fetch(`/api/tokens?workspace=${encodeURIComponent(String(selected.id))}`, { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error('Failed to load tokens')
+        return r.json()
+      })
       .then((data) => {
         setTokens(data.tokens || [])
         setNftInstances(data.nftInstances || [])
       })
       .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
+  }, [selected.id, workspaceLoading])
 
   const tokenNames = ['ICC-YANGYUEN', 'Green', 'Together', 'Integrity', 'Fit']
 
@@ -152,21 +188,10 @@ export default function TokensPage() {
           {nftInstances.map((nft) => (
             <div key={nft.id} className="glass rounded-2xl overflow-hidden">
               <div
-                className="w-full h-32 flex items-center justify-center"
+                className="relative w-full h-32 flex items-center justify-center"
                 style={{ background: 'rgb(var(--surface-2))' }}
               >
-                {nft.imageUrl ? (
-                  <img
-                    src={nft.imageUrl.replace('ipfs://', 'https://ipfs.io/ipfs/')}
-                    alt={nft.name}
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none'
-                    }}
-                  />
-                ) : (
-                  <div className="text-4xl">🍱</div>
-                )}
+                <NftImage nft={nft} />
               </div>
               <div className="p-4">
                 <div className="text-sm font-medium text-default truncate">{nft.name}</div>

@@ -54,7 +54,9 @@ ENV DATABASE_URL="postgresql://postgres:postgres@postgres:5432/yangyuen?schema=p
 
 # Create a non-root user — never run Node as root in production
 RUN addgroup --system --gid 1001 nodejs && \
-    adduser  --system --uid 1001 nextjs
+    adduser  --system --uid 1001 nextjs && \
+    mkdir -p /app/data/token-images && \
+    chown -R nextjs:nodejs /app/data
 
 # Copy the production build artifacts from builder.
 # We do NOT copy node_modules in full — Next.js standalone bundles its own
@@ -79,7 +81,7 @@ EXPOSE 3000
 
 # Health check — hits the root path; replace with /api/health if you add one
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD wget -qO- http://localhost:3000/ || exit 1
+    CMD wget -qO- http://127.0.0.1:3000/ || exit 1
 
 # next start via the standalone server entry point
 ENV PORT=3000

@@ -19,13 +19,20 @@ export function OverviewKpis() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    setLoading(true)
+    const controller = new AbortController()
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) setLoading(true)
+    })
     const wsParam = selected.id === 'all' ? '' : `?workspace=${selected.id}`
-    fetch(`/api/stats${wsParam}`)
-      .then((r) => r.json())
-      .then((data: Stats) => setStats(data))
-      .catch(() => setStats(null))
-      .finally(() => setLoading(false))
+    fetch(`/api/stats${wsParam}`, { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error('Failed to load overview stats')
+        return r.json()
+      })
+      .then((data: Stats) => { if (!controller.signal.aborted) setStats(data) })
+      .catch(() => { if (!controller.signal.aborted) setStats(null) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
   }, [selected])
 
   if (loading) {

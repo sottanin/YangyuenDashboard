@@ -18,7 +18,7 @@ model TransactionHeader {
   gasPrice  Decimal?
   gasUsed   Int?
 
-  details   TransactionDetail[]
+  details TransactionDetail[]
 
   @@index([txId])
   @@index([timestamp])
@@ -42,10 +42,12 @@ model TransactionDetail {
   txType       String
   notify       String?
 
-  header       TransactionHeader @relation(fields: [txId], references: [txId])
+  header TransactionHeader @relation(fields: [txId], references: [txId])
 
   @@index([key])
   @@index([timestamp])
+  @@index([tokenAddress, timestamp])
+  @@index([toHash, timestamp])
   @@index([tokenName])
   @@index([txType])
   @@index([fromHash])
@@ -63,7 +65,7 @@ model RedemptionTransactionHeader {
   gasPrice  Decimal?
   gasUsed   Int?
 
-  details   RedemptionTransactionDetail[]
+  details RedemptionTransactionDetail[]
 
   @@index([txId])
   @@index([timestamp])
@@ -84,11 +86,14 @@ model RedemptionTransactionDetail {
   tokenType    String
   tokenId      String?
 
-  header       RedemptionTransactionHeader @relation(fields: [txId], references: [txId])
+  header RedemptionTransactionHeader @relation(fields: [txId], references: [txId])
 
   @@index([key])
   @@index([timestamp])
   @@index([txId])
+  @@index([tokenAddress, timestamp])
+  @@index([fromHash, timestamp])
+  @@index([toHash, timestamp])
 }
 
 model BatchJobLog {
@@ -110,14 +115,14 @@ model BatchJobLog {
 }
 
 model NFTInstance {
-  id           String  @id
-  isUnique     Boolean @default(false)
+  id           String   @id
+  isUnique     Boolean  @default(false)
   imageUrl     String?
   name         String
   ownerHash    String
   tokenAddress String
   tokenValue   Decimal?
-  visible      Boolean @default(true)
+  visible      Boolean  @default(true)
 }
 
 model Wallet {
@@ -142,22 +147,46 @@ model Workspace {
   updatedAt        DateTime          @updatedAt
   tokenContracts   TokenContract[]
   addressContracts AddressContract[]
+  adminUsers       AdminUserWorkspace[]
 }
 
 model TokenContract {
-  id          String     @id @default(cuid())
-  name        String     @unique
-  address     String
-  workspaceId Int?
-  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+  id                String     @id @default(cuid())
+  name              String     @unique
+  address           String
+  normalizedAddress String     @unique
+  symbol            String?
+  standard          String?
+  decimals          Int?
+  role              String     @default("OTHER")
+  active            Boolean    @default(true)
+  effectiveFrom     DateTime?
+  effectiveTo       DateTime?
+  workspaceId       Int
+  workspace         Workspace @relation(fields: [workspaceId], references: [id])
+  imageKey          String?
+  imageMimeType     String?
+  chartAnnotations  ChartAnnotation[]
+
+  @@index([workspaceId, active])
+  @@index([role, active])
 }
 
 model AddressContract {
-  id          String     @id @default(cuid())
-  name        String     @unique
-  address     String
-  workspaceId Int?
-  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+  id                String     @id @default(cuid())
+  name              String     @unique
+  address           String
+  normalizedAddress String     @unique
+  role              String     @default("OTHER")
+  version           String?
+  active            Boolean    @default(true)
+  effectiveFrom     DateTime?
+  effectiveTo       DateTime?
+  workspaceId       Int?
+  workspace         Workspace? @relation(fields: [workspaceId], references: [id])
+
+  @@index([workspaceId, active])
+  @@index([role, active])
 }
 
 model SystemConfig {
@@ -177,7 +206,69 @@ model AdminUser {
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+  annotationsCreated ChartAnnotation[] @relation("AnnotationCreatedBy")
+  annotationsUpdated ChartAnnotation[] @relation("AnnotationUpdatedBy")
+  roles        AdminUserRole[]
+  workspaces   AdminUserWorkspace[]
 
   @@index([role])
   @@index([active])
+}
+
+model AdminRole {
+  id          String               @id @default(cuid())
+  name        String               @unique
+  description String?
+  system      Boolean              @default(false)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  users       AdminUserRole[]
+  permissions RoleMenuPermission[]
+}
+
+model AdminUserRole {
+  adminUserId String
+  roleId      String
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  role        AdminRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([adminUserId, roleId])
+  @@index([roleId])
+}
+
+model AdminUserWorkspace {
+  adminUserId String
+  workspaceId Int
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([adminUserId, workspaceId])
+  @@index([workspaceId])
+}
+
+model RoleMenuPermission {
+  roleId  String
+  menuKey String
+  role    AdminRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, menuKey])
+  @@index([menuKey])
+}
+
+model ChartAnnotation {
+  id                     String        @id @default(cuid())
+  reportKey              String
+  tokenContractId        String
+  tokenContract          TokenContract @relation(fields: [tokenContractId], references: [id], onDelete: Cascade)
+  workspaceSelectionId   Int?
+  date                   DateTime      @db.Date
+  event                  String        @db.VarChar(500)
+  createdByAdminId       String
+  createdByAdmin         AdminUser     @relation("AnnotationCreatedBy", fields: [createdByAdminId], references: [id])
+  updatedByAdminId       String
+  updatedByAdmin         AdminUser     @relation("AnnotationUpdatedBy", fields: [updatedByAdminId], references: [id])
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  @@index([reportKey, tokenContractId, workspaceSelectionId, date])
 }

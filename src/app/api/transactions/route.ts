@@ -1,19 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
+import { getWorkspaceReportScope, parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
+import type { Prisma } from '@prisma/client'
 
 export async function GET(req: NextRequest) {
+  const admin = await getCurrentAdmin()
+  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!canAccessMenu(admin, 'transactions')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { searchParams } = new URL(req.url)
-  const page = parseInt(searchParams.get('page') || '1', 10)
-  const limit = parseInt(searchParams.get('limit') || '20', 10)
+  const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
+  const limit = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('limit') || '20', 10) || 20))
   const tokenName = searchParams.get('tokenName') || undefined
   const txType = searchParams.get('txType') || undefined
+  const workspace = parseWorkspaceSelection(searchParams.get('workspace'))
+  if (workspace === null) return NextResponse.json({ error: 'Invalid workspace' }, { status: 400 })
+  if (!canAccessWorkspace(admin, workspace)) return NextResponse.json({ error: 'Workspace access denied' }, { status: 403 })
 
   const skip = (page - 1) * limit
 
   try {
-    const where = {
+    const scope = await getWorkspaceReportScope(workspace)
+    const where: Prisma.TransactionDetailWhereInput = {
       ...(tokenName ? { tokenName } : {}),
       ...(txType ? { txType } : {}),
+      ...(scope.tokenAddresses === null ? {} : { tokenAddress: { in: scope.tokenAddresses, mode: 'insensitive' } }),
     }
 
     const [transactions, total] = await Promise.all([

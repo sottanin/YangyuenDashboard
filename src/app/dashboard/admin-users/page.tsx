@@ -11,6 +11,8 @@ interface AdminUser {
   name: string
   email: string | null
   role: string
+  roles: Array<{ role: { id: string; name: string } }>
+  workspaces: Array<{ workspace: { id: number; name: string } }>
   active: boolean
   lastLoginAt: string | null
   createdAt: string
@@ -20,7 +22,8 @@ const emptyForm = {
   username: '',
   name: '',
   email: '',
-  role: 'admin',
+  roleIds: [] as string[],
+  workspaceIds: [] as number[],
   password: '',
   active: true,
 }
@@ -41,11 +44,15 @@ export default function AdminUsersPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<AdminUser | null>(null)
+  const [roles, setRoles] = useState<Array<{ id: string; name: string }>>([])
+  const [workspaces, setWorkspaces] = useState<Array<{ id: number; name: string }>>([])
 
   async function load() {
     setLoading(true)
-    const res = await fetch('/api/admin-users')
+    const [res, rolesResponse, workspacesResponse] = await Promise.all([fetch('/api/admin-users'), fetch('/api/roles'), fetch('/api/workspaces')])
     if (res.ok) setUsers(await res.json())
+    if (rolesResponse.ok) { const data = await rolesResponse.json() as { roles: Array<{ id: string; name: string }> }; setRoles(data.roles) }
+    if (workspacesResponse.ok) setWorkspaces(await workspacesResponse.json() as Array<{ id: number; name: string }>)
     setLoading(false)
   }
 
@@ -65,7 +72,8 @@ export default function AdminUsersPage() {
       username: user.username,
       name: user.name,
       email: user.email || '',
-      role: user.role,
+      roleIds: user.roles.map((assignment) => assignment.role.id),
+      workspaceIds: user.workspaces.map((assignment) => assignment.workspace.id),
       password: '',
       active: user.active,
     })
@@ -165,9 +173,8 @@ export default function AdminUsersPage() {
                     </div>
                   </td>
                   <td className="px-5 py-4">
-                    <span className={user.role === 'superadmin' ? 'pill pill-accent' : 'pill pill-muted'}>
-                      {user.role}
-                    </span>
+                    <div className="flex flex-wrap gap-1">{user.roles.map((assignment) => <span key={assignment.role.id} className={assignment.role.name === 'Superadmin' ? 'pill pill-accent' : 'pill pill-muted'}>{assignment.role.name}</span>)}</div>
+                    {user.role !== 'superadmin' && <div className="mt-1 text-[10px] text-faint">{user.workspaces.map((assignment) => assignment.workspace.name).join(', ') || 'No workspace'}</div>}
                   </td>
                   <td className="px-5 py-4">
                     <span className={user.active ? 'pill pill-success' : 'pill pill-danger'}>
@@ -212,13 +219,8 @@ export default function AdminUsersPage() {
                 <span className="block text-xs text-muted mb-1">Email</span>
                 <input className="input" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
               </label>
-              <label className="block">
-                <span className="block text-xs text-muted mb-1">Role</span>
-                <select className="input" value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
-                  <option value="admin">admin</option>
-                  <option value="superadmin">superadmin</option>
-                </select>
-              </label>
+              <fieldset className="block sm:col-span-2"><legend className="block text-xs text-muted mb-1">Roles</legend><div className="grid grid-cols-2 gap-2">{roles.map((role) => <label key={role.id} className="flex items-center gap-2 rounded-lg border border-default p-2 text-sm text-default"><input type="checkbox" checked={form.roleIds.includes(role.id)} onChange={(event) => setForm((current) => ({ ...current, roleIds: event.target.checked ? [...current.roleIds, role.id] : current.roleIds.filter((id) => id !== role.id) }))} />{role.name}</label>)}</div></fieldset>
+              <fieldset className="block sm:col-span-2"><legend className="block text-xs text-muted mb-1">Workspaces (Superadmin automatically sees all)</legend><div className="grid grid-cols-2 gap-2">{workspaces.map((workspace) => <label key={workspace.id} className="flex items-center gap-2 rounded-lg border border-default p-2 text-sm text-default"><input type="checkbox" checked={form.workspaceIds.includes(workspace.id)} onChange={(event) => setForm((current) => ({ ...current, workspaceIds: event.target.checked ? [...current.workspaceIds, workspace.id] : current.workspaceIds.filter((id) => id !== workspace.id) }))} />{workspace.name}</label>)}</div></fieldset>
               <label className="flex items-end gap-2 pb-2 text-sm text-default">
                 <input
                   type="checkbox"

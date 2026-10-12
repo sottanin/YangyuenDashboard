@@ -1,0 +1,1 @@
+export default function Loading(): React.JSX.Element { return <div className="space-y-4"><div className="shimmer h-12 rounded-xl" /><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{Array.from({ length: 5 }, (_, index) => <div key={index} className="shimmer h-28 rounded-2xl" />)}</div><div className="shimmer h-80 rounded-2xl" /></div> }

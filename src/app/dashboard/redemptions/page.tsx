@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { KpiTile } from '@/components/ui/KpiTile'
 import { SkeletonKpi } from '@/components/ui/SkeletonCard'
 import { Icon } from '@/components/ui/Icon'
+import { useWorkspace } from '@/lib/WorkspaceContext'
 
 interface RedemptionRow {
   id: string
@@ -38,6 +39,7 @@ const STATUS_PILL: Record<string, string> = {
 }
 
 export default function RedemptionsPage() {
+  const { selected } = useWorkspace()
   const [rows, setRows] = useState<RedemptionRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -45,27 +47,40 @@ export default function RedemptionsPage() {
   const [loading, setLoading] = useState(true)
   const [statsTotal, setStatsTotal] = useState(0)
 
-  const fetchRows = useCallback(async (p: number) => {
+  const requestId = useRef(0)
+
+  const fetchRows = useCallback(async (p: number, signal?: AbortSignal) => {
+    const id = ++requestId.current
     setLoading(true)
     try {
-      const res = await fetch(`/api/redemptions?page=${p}&limit=20`)
+      const res = await fetch(`/api/redemptions?page=${p}&limit=20&workspace=${encodeURIComponent(String(selected.id))}`, { signal })
+      if (!res.ok) throw new Error('Failed to load redemptions')
       const data = await res.json()
+      if (id !== requestId.current) return
       setRows(data.redemptions || [])
       setTotal(data.total || 0)
       setTotalPages(data.totalPages || 1)
     } catch {
+      if (signal?.aborted || id !== requestId.current) return
       setRows([])
     } finally {
-      setLoading(false)
+      if (id === requestId.current) setLoading(false)
     }
-  }, [])
+  }, [selected.id])
 
   useEffect(() => {
-    fetchRows(page)
-    fetch('/api/stats').then(r => r.json()).then(s => {
+    const controller = new AbortController()
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) void fetchRows(page, controller.signal)
+    })
+    fetch(`/api/stats?workspace=${encodeURIComponent(String(selected.id))}`, { signal: controller.signal }).then(r => {
+      if (!r.ok) throw new Error('Failed to load stats')
+      return r.json()
+    }).then(s => {
       setStatsTotal(s.totalRedemptions || 0)
     }).catch(() => {})
-  }, [page, fetchRows])
+    return () => controller.abort()
+  }, [fetchRows, page, selected.id])
 
   return (
     <>

@@ -23,9 +23,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    const stored = (localStorage.getItem('nx-theme') as ThemeMode) || 'system'
-    setModeState(stored)
-    setMounted(true)
+    let active = true
+    queueMicrotask(() => {
+      if (!active) return
+      const candidate = localStorage.getItem('nx-theme')
+      const stored: ThemeMode = candidate === 'light' || candidate === 'dark' || candidate === 'system'
+        ? candidate
+        : 'system'
+      setModeState(stored)
+      setMounted(true)
+    })
+    return () => { active = false }
   }, [])
 
   useEffect(() => {

@@ -42,11 +42,21 @@ export function OverviewCharts() {
 
   useEffect(() => {
     const wsParam = selected.id === 'all' ? '' : `?workspace=${selected.id}`
-    setLoading(true)
+    const controller = new AbortController()
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) setLoading(true)
+    })
     Promise.all([
-      fetch(`/api/charts/volume${wsParam}`).then((r) => r.json()),
-      fetch('/api/tokens').then((r) => r.json()),
+      fetch(`/api/charts/volume${wsParam}`, { signal: controller.signal }).then((r) => {
+        if (!r.ok) throw new Error('Failed to load volume')
+        return r.json()
+      }),
+      fetch('/api/tokens', { signal: controller.signal }).then((r) => {
+        if (!r.ok) throw new Error('Failed to load tokens')
+        return r.json()
+      }),
     ]).then(([volRes, tokRes]) => {
+      if (controller.signal.aborted) return
       if (volRes.volume) setVolumeData(volRes.volume)
       if (tokRes.tokens) {
         const total = tokRes.tokens.reduce((s: number, t: { transferCount: number }) => s + t.transferCount, 0) || 1
@@ -61,6 +71,7 @@ export function OverviewCharts() {
         )
       }
     }).catch(() => {
+      if (controller.signal.aborted) return
       // use fallback demo data
       setVolumeData([
         { label: 'Jan', mint: 120, transfer: 340, total: 460 },
@@ -70,7 +81,10 @@ export function OverviewCharts() {
         { label: 'May', mint: 180, transfer: 480, total: 660 },
         { label: 'Jun', mint: 220, transfer: 560, total: 780 },
       ])
-    }).finally(() => setLoading(false))
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false)
+    })
+    return () => controller.abort()
   }, [selected])
 
   if (loading) return (

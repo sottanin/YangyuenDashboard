@@ -1,17 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { authorizeSystemMutation } from '@/lib/system/authorization'
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const authorization = await authorizeSystemMutation()
+  if (authorization !== 'allowed') return NextResponse.json({ error: authorization === 'unauthorized' ? 'Unauthorized' : 'Only superadmin can change workspaces' }, { status: authorization === 'unauthorized' ? 401 : 403 })
   const { id } = await params
-  const body = await req.json() as { name?: string; description?: string }
+  const numId = Number.parseInt(id, 10)
+  if (!Number.isInteger(numId) || numId <= 0) return NextResponse.json({ error: 'Invalid workspace id' }, { status: 400 })
+  let body: { name?: unknown; description?: unknown }
+  try {
+    body = await req.json() as { name?: unknown; description?: unknown }
+  } catch {
+    return NextResponse.json({ error: 'Request body must be valid JSON' }, { status: 400 })
+  }
   const { name, description } = body
-  if (!name?.trim()) {
-    return NextResponse.json({ error: 'name is required' }, { status: 400 })
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 100 || (description !== undefined && (typeof description !== 'string' || description.length > 1000))) {
+    return NextResponse.json({ error: 'Name is required (maximum 100 characters); description maximum is 1000 characters' }, { status: 400 })
   }
   try {
+    const existing = await prisma.workspace.findUnique({ where: { id: numId }, select: { name: true } })
+    if (!existing) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
+    if (existing.name === 'SYSTEM' && name.trim() !== 'SYSTEM') {
+      return NextResponse.json({ error: 'The SYSTEM workspace cannot be renamed' }, { status: 409 })
+    }
+    if (existing.name !== 'SYSTEM' && name.trim().toUpperCase() === 'SYSTEM') {
+      return NextResponse.json({ error: 'SYSTEM is a reserved workspace name' }, { status: 409 })
+    }
     const workspace = await prisma.workspace.update({
-      where: { id: parseInt(id) },
-      data: { name: name.trim(), description: description?.trim() || null },
+      where: { id: numId },
+      data: { name: name.trim(), description: typeof description === 'string' ? description.trim() || null : null },
     })
     return NextResponse.json(workspace)
   } catch {
@@ -20,8 +38,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const authorization = await authorizeSystemMutation()
+  if (authorization !== 'allowed') return NextResponse.json({ error: authorization === 'unauthorized' ? 'Unauthorized' : 'Only superadmin can change workspaces' }, { status: authorization === 'unauthorized' ? 401 : 403 })
   const { id } = await params
-  const numId = parseInt(id)
+  const numId = Number.parseInt(id, 10)
+  if (!Number.isInteger(numId) || numId <= 0) return NextResponse.json({ error: 'Invalid workspace id' }, { status: 400 })
 
   const workspace = await prisma.workspace.findUnique({
     where: { id: numId },
