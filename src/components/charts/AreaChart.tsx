@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { smoothPath, fmt } from './chartUtils'
 import { useResolvedColors } from './useResolvedColors'
 
@@ -11,6 +11,7 @@ interface AreaKey {
 }
 
 interface AreaChartProps {
+  // Chart components accept typed data rows with arbitrary numeric series keys.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any[]
   height?: number
@@ -29,6 +30,7 @@ export function AreaChart({
   gradientFill = true,
 }: AreaChartProps) {
   const wrapRef = useRef<HTMLDivElement>(null)
+  const gradientId = useId()
   const [width, setWidth] = useState(800)
   const [hover, setHover] = useState<number | null>(null)
   const colorList = useResolvedColors(keys.map((k) => k.color))
@@ -40,6 +42,19 @@ export function AreaChart({
     ro.observe(wrapRef.current)
     return () => ro.disconnect()
   }, [])
+
+  if (data.length === 0) {
+    return (
+      <div
+        ref={wrapRef}
+        className="flex w-full items-center justify-center text-sm text-muted"
+        style={{ height }}
+        role="status"
+      >
+        No transaction data yet
+      </div>
+    )
+  }
 
   const padL = 44, padR = 16, padT = 16, padB = 32
   const innerW = width - padL - padR
@@ -60,7 +75,7 @@ export function AreaChart({
       <svg width={width} height={height} className="overflow-visible">
         <defs>
           {resolvedKeys.map((k, i) => (
-            <linearGradient key={k.key} id={`area-grad-${i}-${k.key}`} x1="0" x2="0" y1="0" y2="1">
+            <linearGradient key={k.key} id={`${gradientId}-area-grad-${i}`} x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor={k._color} stopOpacity="0.35" />
               <stop offset="100%" stopColor={k._color} stopOpacity="0" />
             </linearGradient>
@@ -93,13 +108,23 @@ export function AreaChart({
         {resolvedKeys.map((k, ki) => {
           const pts: [number, number][] = data.map((d, i) => [xScale(i), yScale(Number(d[k.key]) || 0)])
           const linePath = smoothPath(pts)
-          const areaPath = `${linePath} L ${pts[pts.length - 1][0]},${yScale(min)} L ${pts[0][0]},${yScale(min)} Z`
+          const areaPath = pts.length > 1
+            ? `${linePath} L ${pts[pts.length - 1][0]},${yScale(min)} L ${pts[0][0]},${yScale(min)} Z`
+            : ''
           return (
             <g key={k.key}>
-              {gradientFill && <path d={areaPath} fill={`url(#area-grad-${ki}-${k.key})`} />}
-              <path d={linePath} fill="none" stroke={k._color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              {gradientFill && areaPath && <path d={areaPath} fill={`url(#${gradientId}-area-grad-${ki})`} />}
+              {linePath && <path d={linePath} fill="none" stroke={k._color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
               {pts.map(([x, y], i) => (
-                <circle key={i} cx={x} cy={y} r={hover === i ? 4 : 0} fill={k._color} stroke="rgb(var(--surface))" strokeWidth="2" />
+                <circle
+                  key={i}
+                  cx={x}
+                  cy={y}
+                  r={pts.length === 1 || hover === i ? 4 : 0}
+                  fill={k._color}
+                  stroke="rgb(var(--surface))"
+                  strokeWidth="2"
+                />
               ))}
             </g>
           )

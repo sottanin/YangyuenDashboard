@@ -15,15 +15,22 @@ interface SparklineProps {
 export function Sparkline({ values, color = 'var(--accent)', width = 100, height = 32, fill = true }: SparklineProps) {
   const [resolved] = useResolvedColors([color])
   const id = useId()
+
+  if (values.length === 0) {
+    return <svg width={width} height={height} className="block" role="img" aria-label="No trend data yet" />
+  }
+
   const max = Math.max(...values)
   const min = Math.min(...values)
   const range = max - min || 1
   const pts: [number, number][] = values.map((v, i) => [
-    (i / (values.length - 1)) * width,
+    values.length === 1 ? width / 2 : (i / (values.length - 1)) * width,
     height - ((v - min) / range) * (height - 4) - 2,
   ])
   const linePath = smoothPath(pts)
-  const areaPath = `${linePath} L ${pts[pts.length - 1][0]},${height} L ${pts[0][0]},${height} Z`
+  const areaPath = values.length > 1
+    ? `${linePath} L ${pts[pts.length - 1][0]},${height} L ${pts[0][0]},${height} Z`
+    : ''
 
   return (
     <svg width={width} height={height} className="block">
@@ -33,8 +40,9 @@ export function Sparkline({ values, color = 'var(--accent)', width = 100, height
           <stop offset="100%" stopColor={resolved} stopOpacity="0" />
         </linearGradient>
       </defs>
-      {fill && <path d={areaPath} fill={`url(#${id})`} />}
+      {fill && areaPath && <path d={areaPath} fill={`url(#${id})`} />}
       <path d={linePath} fill="none" stroke={resolved} strokeWidth="1.5" strokeLinecap="round" />
+      {values.length === 1 && <circle cx={pts[0][0]} cy={pts[0][1]} r="2" fill={resolved} />}
     </svg>
   )
 }

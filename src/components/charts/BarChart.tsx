@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { fmt } from './chartUtils'
 import { useResolvedColors } from './useResolvedColors'
 
@@ -11,6 +11,7 @@ interface BarKey {
 }
 
 interface BarChartProps {
+  // Chart components accept typed data rows with arbitrary numeric series keys.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any[]
   height?: number
@@ -31,8 +32,12 @@ export function BarChart({
   keys,
 }: BarChartProps) {
   const wrapRef = useRef<HTMLDivElement>(null)
+  const gradientId = useId()
   const [width, setWidth] = useState(800)
   const [hover, setHover] = useState<{ i: number; ki: number } | null>(null)
+  const groupKeys: BarKey[] = keys || [{ key: valueKey, color, label: valueKey }]
+  const colorList = useResolvedColors(groupKeys.map((k) => k.color))
+  const resolvedGroupKeys = groupKeys.map((k, i) => ({ ...k, _color: colorList[i] }))
 
   useEffect(() => {
     if (!wrapRef.current) return
@@ -41,17 +46,27 @@ export function BarChart({
     return () => ro.disconnect()
   }, [])
 
+  if (data.length === 0) {
+    return (
+      <div
+        ref={wrapRef}
+        className="flex w-full items-center justify-center text-sm text-muted"
+        style={{ height }}
+        role="status"
+      >
+        No transaction data yet
+      </div>
+    )
+  }
+
   const padL = 44, padR = 16, padT = 16, padB = 32
   const innerW = width - padL - padR
   const innerH = height - padT - padB
 
-  const groupKeys: BarKey[] = keys || [{ key: valueKey, color, label: valueKey }]
-  const colorList = useResolvedColors(groupKeys.map((k) => k.color))
-  const resolvedGroupKeys = groupKeys.map((k, i) => ({ ...k, _color: colorList[i] }))
-
-  const max = stacked
-    ? Math.max(...data.map((d) => groupKeys.reduce((s, k) => s + (Number(d[k.key]) || 0), 0))) * 1.1
-    : Math.max(...data.flatMap((d) => groupKeys.map((k) => Number(d[k.key]) || 0))) * 1.1 || 1
+  const maxValue = stacked
+    ? Math.max(...data.map((d) => groupKeys.reduce((s, k) => s + (Number(d[k.key]) || 0), 0)))
+    : Math.max(...data.flatMap((d) => groupKeys.map((k) => Number(d[k.key]) || 0)))
+  const max = maxValue > 0 ? maxValue * 1.1 : 1
 
   const bandW = innerW / (data.length || 1)
   const groupW = bandW * 0.7
@@ -66,7 +81,7 @@ export function BarChart({
       <svg width={width} height={height} className="overflow-visible">
         <defs>
           {resolvedGroupKeys.map((k, i) => (
-            <linearGradient key={i} id={`bar-grad-${i}-${k.key}`} x1="0" x2="0" y1="0" y2="1">
+            <linearGradient key={i} id={`${gradientId}-bar-grad-${i}`} x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor={k._color} stopOpacity="1" />
               <stop offset="100%" stopColor={k._color} stopOpacity="0.6" />
             </linearGradient>
@@ -112,7 +127,7 @@ export function BarChart({
                   const path = `M${x + tl},${y} L${x + w - tr},${y} ${tr ? `Q${x + w},${y} ${x + w},${y + tr}` : ''} L${x + w},${y + barH - br} ${br ? `Q${x + w},${y + barH} ${x + w - br},${y + barH}` : ''} L${x + bl},${y + barH} ${bl ? `Q${x},${y + barH} ${x},${y + barH - bl}` : ''} L${x},${y + tl} ${tl ? `Q${x},${y} ${x + tl},${y}` : ''} Z`
                   return (
                     <path key={k.key} d={path}
-                      fill={`url(#bar-grad-${ki}-${k.key})`}
+                      fill={`url(#${gradientId}-bar-grad-${ki})`}
                       onMouseEnter={() => setHover({ i, ki })}
                       onMouseLeave={() => setHover(null)}
                       style={{ transition: 'opacity 0.2s', opacity: hover && hover.i !== i ? 0.5 : 1 }}
@@ -126,7 +141,7 @@ export function BarChart({
                     x={x} y={y}
                     width={barW - 2}
                     height={Math.max(0, barH)}
-                    fill={`url(#bar-grad-${ki}-${k.key})`}
+                    fill={`url(#${gradientId}-bar-grad-${ki})`}
                     rx="3"
                     onMouseEnter={() => setHover({ i, ki })}
                     onMouseLeave={() => setHover(null)}
