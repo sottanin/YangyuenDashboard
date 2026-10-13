@@ -62,9 +62,6 @@ function formatAmount(value: string): string {
 function formatTimestamp(value: string, timezone: string): string {
   return new Intl.DateTimeFormat('en-GB', { timeZone: timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
-function formatHistoryStart(value: string, timezone: string): string {
-  return new Intl.DateTimeFormat('en-GB', { timeZone: timezone, dateStyle: 'medium' }).format(new Date(value))
-}
 async function responseJson<T>(response: Response): Promise<T> {
   const body: unknown = await response.json()
   if (!response.ok) {
@@ -78,6 +75,7 @@ export interface TokenAnalysisPageProps { reportType?: 'kap20' | 'kap22' }
 export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysisPageProps) {
   const isKap20 = reportType === 'kap20'
   const reportLabel = isKap20 ? 'KAP-20' : 'KAP-22'
+  const reportTitle = isKap20 ? 'Tokens (KAP-20)' : 'Point Tokens (KAP-22)'
   const apiBase = `/api/reports/${reportType}`
   const { selected, loading: workspaceLoading } = useWorkspace()
   const [tokens, setTokens] = useState<TokenOption[]>([])
@@ -110,7 +108,10 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
   const summaryRequest = useRef(0)
   const tableRequest = useRef(0)
   const topUsersRequest = useRef(0)
+  const annotationRequest = useRef(0)
   const workspace = String(selected.id)
+  const annotationSelection = useRef({ token: '', workspace: '' })
+  const annotationSelectionGeneration = useRef(0)
 
   const loadTokens = useCallback(async (signal?: AbortSignal): Promise<void> => {
     const requestId = ++tokenRequest.current
@@ -223,21 +224,32 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
   }, [page, search, selectedToken, loadTransactions])
 
   const loadAnnotations = useCallback(async (token: string, signal?: AbortSignal): Promise<void> => {
+    const requestId = ++annotationRequest.current
     try {
       const response = await fetch(`${apiBase}/annotations?token=${encodeURIComponent(token)}&workspace=${encodeURIComponent(workspace)}`, { signal })
       const data = await responseJson<{ annotations: ChartAnnotation[] }>(response)
-      setAnnotations(data.annotations)
+      if (requestId === annotationRequest.current) setAnnotations(data.annotations)
     } catch (error) {
-      if (!signal?.aborted) setAnnotationError(error instanceof Error ? error.message : 'Unable to load annotations')
+      if (!signal?.aborted && requestId === annotationRequest.current) {
+        setAnnotationError(error instanceof Error ? error.message : 'Unable to load annotations')
+      }
     }
   }, [apiBase, workspace])
 
   useEffect(() => {
-    if (!selectedToken) return
+    annotationSelection.current = { token: selectedToken, workspace }
+    annotationSelectionGeneration.current += 1
+    annotationRequest.current += 1
     const controller = new AbortController()
-    queueMicrotask(() => { if (!controller.signal.aborted) void loadAnnotations(selectedToken, controller.signal) })
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return
+      setAnnotations([])
+      setAnnotationError('')
+      setAnnotationSaving(false)
+      if (selectedToken) void loadAnnotations(selectedToken, controller.signal)
+    })
     return () => controller.abort()
-  }, [selectedToken, loadAnnotations])
+  }, [selectedToken, loadAnnotations, workspace])
 
   function periodStart(end: string): string | null {
     if (period === 'all') return null
@@ -276,30 +288,56 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
   }
   async function saveAnnotation(): Promise<void> {
     if (!selectedToken) return
+    const tokenAtStart = selectedToken
+    const workspaceAtStart = workspace
+    const generationAtStart = annotationSelectionGeneration.current
+    const selectionIsCurrent = (): boolean => (
+      generationAtStart === annotationSelectionGeneration.current
+      && annotationSelection.current.token === tokenAtStart
+      && annotationSelection.current.workspace === workspaceAtStart
+    )
     setAnnotationSaving(true); setAnnotationError('')
     try {
-      const response = await fetch(editingAnnotation ? `${apiBase}/annotations/${editingAnnotation.id}` : `${apiBase}/annotations`, { method: editingAnnotation ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: selectedToken, workspace, date: annotationDate, event: annotationEvent }) })
+      const response = await fetch(editingAnnotation ? `${apiBase}/annotations/${editingAnnotation.id}` : `${apiBase}/annotations`, { method: editingAnnotation ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tokenAtStart, workspace: workspaceAtStart, date: annotationDate, event: annotationEvent }) })
       const result = await response.json() as { error?: string }
+      if (!selectionIsCurrent()) return
       if (!response.ok) throw new Error(result.error ?? 'Unable to save annotation')
-      await loadAnnotations(selectedToken); setAnnotationModal(false)
-    } catch (error) { setAnnotationError(error instanceof Error ? error.message : 'Unable to save annotation') }
-    finally { setAnnotationSaving(false) }
+      await loadAnnotations(tokenAtStart)
+      if (selectionIsCurrent()) setAnnotationModal(false)
+    } catch (error) {
+      if (selectionIsCurrent()) setAnnotationError(error instanceof Error ? error.message : 'Unable to save annotation')
+    } finally {
+      if (selectionIsCurrent()) setAnnotationSaving(false)
+    }
   }
   async function deleteAnnotation(annotation: ChartAnnotation): Promise<void> {
     if (!window.confirm('Delete this annotation?')) return
+    const tokenAtStart = selectedToken
+    const workspaceAtStart = workspace
+    const generationAtStart = annotationSelectionGeneration.current
+    const selectionIsCurrent = (): boolean => (
+      generationAtStart === annotationSelectionGeneration.current
+      && annotationSelection.current.token === tokenAtStart
+      && annotationSelection.current.workspace === workspaceAtStart
+    )
     setAnnotationSaving(true); setAnnotationError('')
     try {
-      const query = new URLSearchParams({ token: selectedToken, workspace })
+      const query = new URLSearchParams({ token: tokenAtStart, workspace: workspaceAtStart })
       const response = await fetch(`${apiBase}/annotations/${annotation.id}?${query}`, { method: 'DELETE' })
+      if (!selectionIsCurrent()) return
       if (!response.ok) { const result = await response.json() as { error?: string }; throw new Error(result.error ?? 'Unable to delete annotation') }
-      await loadAnnotations(selectedToken); setEditingAnnotation(null); setAnnotationDate(''); setAnnotationEvent('')
-    } catch (error) { setAnnotationError(error instanceof Error ? error.message : 'Unable to delete annotation') }
-    finally { setAnnotationSaving(false) }
+      await loadAnnotations(tokenAtStart)
+      if (selectionIsCurrent()) { setEditingAnnotation(null); setAnnotationDate(''); setAnnotationEvent('') }
+    } catch (error) {
+      if (selectionIsCurrent()) setAnnotationError(error instanceof Error ? error.message : 'Unable to delete annotation')
+    } finally {
+      if (selectionIsCurrent()) setAnnotationSaving(false)
+    }
   }
 
   return <div className="min-w-0 max-w-full">
     <PageHeader
-      title={`${reportLabel} Analysis`}
+      title={reportTitle}
       subtitle="Pool balances, mint and burn activity from the configured business history"
       actions={<div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-end sm:justify-end">
         <TokenSelector tokens={tokens} value={selectedToken} disabled={tokensLoading || tokens.length === 0} onChange={(value) => { setPage(1); setSearchInput(''); setSearch(''); setSelectedToken(value) }} />
@@ -333,28 +371,28 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
       </div> : null}
 
       <div className="mb-4 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card className="min-w-0 max-w-full" title="Daily Transactions" subtitle={`${selectedOption?.symbol ?? 'KAP-22'} · ${summary?.timezone ?? 'Asia/Bangkok'}${summary ? ` · since ${formatHistoryStart(summary.historyStart, summary.timezone)}` : ''}`}>
+        <Card className="min-w-0 max-w-full" title="Daily Transaction Count" subtitle="แสดงจำนวนรายการธุรกรรมทั้งหมดที่ผู้ใช้งานทำในแต่ละวัน (หน่วย: Transactions)">
           {customRangeInvalid ? <div className="flex h-[300px] items-center justify-center text-sm text-red-400">Select a valid From and To date.</div> : summaryLoading ? <div className="h-[300px] shimmer rounded-xl" /> : transactionChartData.length === 0 ? <div className="flex h-[300px] items-center justify-center text-sm text-muted">No transfer history found</div> : <SingleLineChart data={transactionChartData} label="Total transactions" tooltipUnit="transactions" averageUnit="transactions" valueKind="count" color="var(--success)" />}
         </Card>
-        <Card className="min-w-0 max-w-full" title="Daily Amount Transfer" subtitle={`${selectedOption?.symbol ?? 'KAP-22'} · ${summary?.timezone ?? 'Asia/Bangkok'}${summary ? ` · since ${formatHistoryStart(summary.historyStart, summary.timezone)}` : ''}`}>
+        <Card className="min-w-0 max-w-full" title="Daily Token Transfer Volume" subtitle="แสดงจำนวนโทเคนทั้งหมดที่ผู้ใช้งานโอนในแต่ละวัน (หน่วย: Tokens)">
           {customRangeInvalid ? <div className="flex h-[300px] items-center justify-center text-sm text-red-400">Select a valid From and To date.</div> : summaryLoading ? <div className="h-[300px] shimmer rounded-xl" /> : amountChartData.length === 0 ? <div className="flex h-[300px] items-center justify-center text-sm text-muted">No transfer history found</div> : <SingleLineChart data={amountChartData} label={`Total amount (${summary?.token.symbol ?? 'KAP-22'})`} tooltipUnit={`amounts (${summary?.token.symbol ?? 'KAP-22'})`} averageUnit={summary?.token.symbol ?? 'KAP-22'} valueKind="amount" color="var(--danger)" />}
         </Card>
       </div>
 
-      {isKap20 && summary ? <Card className="mb-4 min-w-0 max-w-full" title="Point Token Transfer Performance" subtitle="Outgoing ICCYYN to Loyalty Swap or Workspace Wallet as a percentage of incoming ICCYYN from Initial Mint and Workspace wallets">
+      {isKap20 && summary ? <Card className="mb-4 min-w-0 max-w-full" title="KAP-20 Available Balance for Token Conversion" subtitle="จำนวนโทเคน KAP-20 คงเหลือที่ระบบมีไว้รองรับการแลกเปลี่ยนจาก KAP-22 เป็น KAP-20 ของผู้ใช้งาน">
         <PointTokenLockDonuts data={summary.pointTokenLocks ?? []} balanceSymbol={summary.token.symbol} />
       </Card> : null}
 
       <div className="mb-4 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card className="min-w-0 max-w-full" title="Top 10 Users by Tokens Received" subtitle={`${selectedOption?.symbol ?? 'KAP-22'} · all-time pool transfers`}>
+        <Card className="min-w-0 max-w-full" title="Top 10 Token Recipients" subtitle="จัดอันดับผู้ใช้งาน 10 คนที่ได้รับโทเคนสะสมมากที่สุด (Total Tokens Received)">
           {topUsersError ? <ErrorCard message={topUsersError} onRetry={() => selectedToken && void loadTopUsers(selectedToken)} /> : topUsersLoading || !topUsers ? <div className="h-[336px] shimmer rounded-xl" /> : topUsers.topReceived.length === 0 ? <div className="flex h-[336px] items-center justify-center text-center text-sm text-muted">No user transfers found</div> : <HorizontalBarChart data={topUsers.topReceived} symbol={topUsers.token.symbol} color="var(--accent)" ariaLabel={`Top 10 users by total ${topUsers.token.symbol} received`} />}
         </Card>
-        <Card className="min-w-0 max-w-full" title="Top 10 Users by Token Balance" subtitle={`${selectedOption?.symbol ?? 'KAP-22'} · latest synchronized on-chain balance`}>
-          {topUsersError ? <ErrorCard message={topUsersError} onRetry={() => selectedToken && void loadTopUsers(selectedToken)} /> : topUsersLoading || !topUsers ? <div className="h-[336px] shimmer rounded-xl" /> : topUsers.topBalances.length === 0 ? <div className="flex h-[336px] items-center justify-center text-center text-sm text-muted">No positive synchronized on-chain balances found</div> : <HorizontalBarChart data={topUsers.topBalances} symbol={topUsers.token.symbol} color="var(--success)" ariaLabel={`Top 10 users by latest synchronized on-chain ${topUsers.token.symbol} balance`} />}
+        <Card className="min-w-0 max-w-full" title="Top 10 Token Holders by Balance" subtitle="จัดอันดับผู้ใช้งาน 10 คนที่มีจำนวนโทเคนคงเหลือใน Wallet สูงที่สุด (Current Token Balance)">
+          {topUsersError ? <ErrorCard message={topUsersError} onRetry={() => selectedToken && void loadTopUsers(selectedToken)} /> : topUsersLoading || !topUsers ? <div className="h-[336px] shimmer rounded-xl" /> : topUsers.topBalances.length === 0 ? <div className="flex h-[336px] items-center justify-center text-center text-sm text-muted">No positive synchronized on-chain balances found</div> : <HorizontalBarChart data={topUsers.topBalances} symbol={topUsers.token.symbol} color="var(--success)" ariaLabel={`Top 10 users by latest synchronized on-chain ${topUsers.token.symbol} balance`} rankMarker="wealth" />}
         </Card>
       </div>
 
-      <Card className="min-w-0 max-w-full" title={`${reportLabel} Transactions`} subtitle={`${selectedOption?.name ?? 'Selected token'} · latest events first`} noPad>
+      <Card className="min-w-0 max-w-full" title="Transaction History" subtitle="ตารางแสดงรายละเอียดธุรกรรมทั้งหมด เช่น วันที่ทำรายการ, Transaction ID, ผู้ส่ง, ผู้รับ, จำนวนโทเคน และสถานะธุรกรรม" noPad>
         <div className="border-b border-default p-4 sm:p-5">
           <label htmlFor="kap22-transaction-search" className="sr-only">Search {reportLabel} transactions</label>
           <div className="relative max-w-xl">

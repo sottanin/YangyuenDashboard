@@ -14,6 +14,7 @@ interface HorizontalBarChartProps {
   symbol: string
   color?: string
   ariaLabel: string
+  rankMarker?: 'trophy' | 'wealth'
 }
 
 function compactAddress(address: string): string {
@@ -29,15 +30,20 @@ function formatExactAmount(value: string): string {
   return `${sign}${grouped}${visibleFraction ? `.${visibleFraction}` : ''}`
 }
 
-function RankMarker({ index, y }: { index: number; y: number }): React.JSX.Element {
+function RankMarker({ index, y, variant }: { index: number; y: number; variant: 'trophy' | 'wealth' }): React.JSX.Element {
   if (index > 2) return <text x="0" y={y} fontSize="10.5" fill="rgb(var(--text-faint))">#{index + 1}</text>
   const colorClass = index === 0 ? 'text-yellow-500' : index === 1 ? 'text-slate-300' : 'text-amber-700'
+  if (variant === 'wealth') return <g transform={`translate(0 ${y - 12})`} className={colorClass} fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" aria-label={`Rank ${index + 1} wealth marker`}>
+    <path d="M6 2h6l-1.5 3h-3L6 2Z" fill="currentColor" stroke="none" />
+    <path d="M7.5 5h3M7.3 5C4.7 7.1 3.5 9.4 3.5 12c0 3 2.2 4 5.5 4s5.5-1 5.5-4c0-2.6-1.2-4.9-3.8-7" />
+    <path d="M10.9 8.7c-.4-.4-1-.6-1.7-.6-1 0-1.7.5-1.7 1.2 0 .8.7 1.1 1.7 1.3 1 .2 1.7.6 1.7 1.4 0 .7-.7 1.3-1.8 1.3-.8 0-1.5-.3-2-.8M9.2 7.3v6.8" />
+  </g>
   return <g transform={`translate(0 ${y - 12})`} className={colorClass} fill="currentColor" aria-label={`Rank ${index + 1}`}>
     <path d="M4 2h10v3.1c0 3.4-2 5.9-5 6.6v2.1h3v2H6v-2h3v-2.1C6 11 4 8.5 4 5.1V2Zm-2 1h2v2.2C4 7.1 3 8.4 1.2 8.8L.5 7.1C1.5 6.8 2 6.2 2 5.2V3Zm12 0h2v2.2c0 1 .5 1.6 1.5 1.9l-.7 1.7C15 8.4 14 7.1 14 5.2V3Z" />
   </g>
 }
 
-export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', ariaLabel }: HorizontalBarChartProps): React.JSX.Element {
+export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', ariaLabel, rankMarker = 'trophy' }: HorizontalBarChartProps): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(640)
@@ -90,7 +96,7 @@ export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', aria
         const barHeight = rowHeight * 0.66
         const barWidth = (numericValues[index] / maximum) * innerWidth
         return <g key={point.walletAddress} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)}>
-          <RankMarker index={index} y={y + barHeight / 2 + 4} />
+          <RankMarker index={index} y={y + barHeight / 2 + 4} variant={rankMarker} />
           <a href={`https://www.kubscan.com/address/${encodeURIComponent(point.walletAddress)}?tab=tokens`} target="_blank" rel="noopener noreferrer" aria-label={`Open rank ${index + 1} wallet ${point.walletAddress} tokens on KubScan`} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)}>
             <g transform={`translate(24 ${y + barHeight / 2 - 6})`} fill="none" stroke="rgb(var(--text-muted))" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="4" r="3" /><path d="M1 13v-1c0-2.2 2.2-4 5-4s5 1.8 5 4v1" /></g>
             <text x="40" y={y + barHeight / 2 + 4} fontSize="10.5" fill="rgb(var(--text-muted))" className="hover:fill-[rgb(var(--accent))]">{compactAddress(point.walletAddress)}</text>

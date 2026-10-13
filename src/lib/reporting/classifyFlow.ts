@@ -28,7 +28,17 @@ export interface FlowEvent {
 
 const addresses = Object.fromEntries(Object.entries(SYSTEM_ADDRESSES).map(([key, value]) => [key, normalizeAddress(value)])) as Record<keyof typeof SYSTEM_ADDRESSES, string>
 const tokens = Object.fromEntries(Object.entries(TOKEN_ADDRESSES).map(([key, value]) => [key, normalizeAddress(value)])) as Record<keyof typeof TOKEN_ADDRESSES, string>
-const pointTokens = new Set([tokens.fit, tokens.grn, tokens.int, tokens.tgt])
+const primaryTokens = new Set([tokens.iccyyn, tokens.yyn])
+const pointTokens = new Set([
+  tokens.fit,
+  tokens.grn,
+  tokens.int,
+  tokens.tgt,
+  tokens.evt,
+  tokens.hlt,
+  tokens.sct,
+  tokens.gvt,
+])
 const pointContracts = pointTokens
 const pools = new Set([addresses.distributorPool, addresses.operationPool])
 const marketplaces = new Set([addresses.marketplaceV1, addresses.marketplaceV2])
@@ -40,18 +50,18 @@ export function classifyFlow(event: FlowEvent): FlowClassification {
   const isPoint = pointTokens.has(token)
   const isNft = token === tokens.redemptionNft
 
-  if (token === tokens.iccyyn && from === addresses.zero && to === addresses.initialMint) return 'INITIAL_MINT'
-  if (token === tokens.iccyyn && from === addresses.initialMint && to === addresses.main) return 'INITIAL_SUPPLY_TO_MAIN'
-  if (token === tokens.iccyyn && from === addresses.main && to === addresses.workspace) return 'POINT_FUNDING'
-  if (token === tokens.iccyyn && from === addresses.workspace && pointContracts.has(to)) return 'POINT_LOCK'
+  if (primaryTokens.has(token) && from === addresses.zero && to === addresses.initialMint) return 'INITIAL_MINT'
+  if (primaryTokens.has(token) && from === addresses.initialMint && to === addresses.main) return 'INITIAL_SUPPLY_TO_MAIN'
+  if (primaryTokens.has(token) && from === addresses.main && to === addresses.workspace) return 'POINT_FUNDING'
+  if (primaryTokens.has(token) && from === addresses.workspace && pointContracts.has(to)) return 'POINT_LOCK'
   if (isPoint && from === addresses.zero && pools.has(to)) return 'POINT_MINT_TO_POOL'
   if (isPoint && pools.has(from) && to !== addresses.zero) return 'POINT_DISTRIBUTION'
   if (isPoint && from !== addresses.zero && to === addresses.loyaltySwap) return 'SWAP_POINT_DEPOSIT'
-  if (token === tokens.iccyyn && pointContracts.has(from) && to === addresses.loyaltySwap) return 'SWAP_COLLATERAL_RELEASE'
-  if (token === tokens.iccyyn && from === addresses.loyaltySwap && to !== addresses.zero) return 'SWAP_ICCYYN_PAYOUT'
+  if (primaryTokens.has(token) && pointContracts.has(from) && to === addresses.loyaltySwap) return 'SWAP_COLLATERAL_RELEASE'
+  if (primaryTokens.has(token) && from === addresses.loyaltySwap && to !== addresses.zero) return 'SWAP_ICCYYN_PAYOUT'
   if (isPoint && to === addresses.zero) return 'SWAP_POINT_BURN'
-  if (token === tokens.iccyyn && marketplaces.has(to)) return 'MARKETPLACE_PAYMENT'
-  if (token === tokens.iccyyn && marketplaces.has(from) && to === addresses.marketplaceFee) return 'MARKETPLACE_FEE'
+  if (primaryTokens.has(token) && marketplaces.has(to)) return 'MARKETPLACE_PAYMENT'
+  if (primaryTokens.has(token) && marketplaces.has(from) && to === addresses.marketplaceFee) return 'MARKETPLACE_FEE'
   if (isNft && from === addresses.zero && to !== addresses.zero) return 'NFT_MINT'
   if (isNft && from !== addresses.zero && to === addresses.zero) return 'NFT_USE_BURN'
   return 'UNCLASSIFIED'

@@ -42,8 +42,7 @@ export function TopBar({ onToggleSidebar, currentPageLabel, admin }: TopBarProps
     router.refresh()
   }
 
-  const allOption = { id: 'all' as const, name: 'All Workspaces' }
-  const wsOptions = admin.allWorkspaces ? [allOption, ...workspaces] : workspaces
+  const wsOptions = workspaces
 
   return (
     <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-6 px-6 pt-4 pb-3 glass-strong border-b border-default">

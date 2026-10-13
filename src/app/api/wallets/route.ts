@@ -3,8 +3,18 @@ import { prisma } from '@/lib/prisma'
 import { canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
 import { getWorkspaceReportScope, parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
 import { Prisma, type Wallet } from '@prisma/client'
+import { walletBalanceFieldForTokenAddress, type WalletBalanceField } from '@/lib/walletBalances'
 
 interface CountRow { count: bigint }
+const WALLET_TOKEN_DISPLAY_ORDER: readonly WalletBalanceField[] = [
+  'ICCYYN', 'GRN', 'TGT', 'INT', 'FIT', 'YYN', 'EVT', 'HLT', 'SCT', 'GVT',
+]
+interface VisibleToken {
+  field: WalletBalanceField
+  name: string
+  symbol: string
+  standard: string
+}
 
 export async function GET(req: NextRequest) {
   const admin = await getCurrentAdmin()
@@ -20,12 +30,35 @@ export async function GET(req: NextRequest) {
 
   try {
     const scope = await getWorkspaceReportScope(workspace)
-    const scopedSymbols = scope.tokenAddresses === null
+    const scopedBalanceFields: ReadonlySet<WalletBalanceField> | null = scope.tokenAddresses === null
       ? null
-      : new Set((await prisma.tokenContract.findMany({
-          where: { normalizedAddress: { in: scope.tokenAddresses } },
-          select: { symbol: true },
-        })).flatMap((token) => token.symbol ? [token.symbol.toUpperCase()] : []))
+      : new Set(scope.tokenAddresses.flatMap((address) => {
+          const field = walletBalanceFieldForTokenAddress(address)
+          return field ? [field] : []
+        }))
+    const registryTokens = await prisma.tokenContract.findMany({
+      where: {
+        active: true,
+        standard: { in: ['KAP-20', 'KAP-22'] },
+        ...(scope.tokenAddresses === null ? {} : { normalizedAddress: { in: scope.tokenAddresses } }),
+      },
+      select: { name: true, symbol: true, standard: true, normalizedAddress: true },
+      orderBy: [{ standard: 'asc' }, { name: 'asc' }],
+    })
+    const visibleTokensByField = new Map<WalletBalanceField, VisibleToken>()
+    for (const token of registryTokens) {
+      const field = walletBalanceFieldForTokenAddress(token.normalizedAddress)
+      if (!field || visibleTokensByField.has(field)) continue
+      visibleTokensByField.set(field, {
+        field,
+        name: token.name,
+        symbol: token.symbol ?? token.name,
+        standard: token.standard ?? '',
+      })
+    }
+    const visibleTokens = [...visibleTokensByField.values()].sort((left, right) => {
+      return WALLET_TOKEN_DISPLAY_ORDER.indexOf(left.field) - WALLET_TOKEN_DISPLAY_ORDER.indexOf(right.field)
+    })
     let wallets: Wallet[]
     let total: number
     if (scope.tokenAddresses === null) {
@@ -45,7 +78,7 @@ export async function GET(req: NextRequest) {
         )
       `
       const [rows, counts] = await Promise.all([
-        prisma.$queryRaw<Wallet[]>(Prisma.sql`SELECT wallet.* FROM "Wallet" wallet WHERE ${scoped} ORDER BY wallet."ICCYYN" DESC OFFSET ${skip} LIMIT ${limit}`),
+        prisma.$queryRaw<Wallet[]>(Prisma.sql`SELECT wallet.* FROM "Wallet" wallet WHERE ${scoped} ORDER BY LOWER(wallet."walletId") ASC OFFSET ${skip} LIMIT ${limit}`),
         prisma.$queryRaw<CountRow[]>(Prisma.sql`SELECT COUNT(*)::bigint count FROM "Wallet" wallet WHERE ${scoped}`),
       ])
       wallets = rows
@@ -53,17 +86,33 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      wallets: wallets.map((w) => ({
-        ...w,
-        ICCYYN: scopedSymbols === null || scopedSymbols.has('ICCYYN') ? w.ICCYYN.toString() : '0',
-        FIT: scopedSymbols === null || scopedSymbols.has('FIT') ? w.FIT.toString() : '0',
-        TGT: scopedSymbols === null || scopedSymbols.has('TGT') ? w.TGT.toString() : '0',
-        INT: scopedSymbols === null || scopedSymbols.has('INT') ? w.INT.toString() : '0',
-        GRN: scopedSymbols === null || scopedSymbols.has('GRN') ? w.GRN.toString() : '0',
-      })),
+      wallets: wallets.map((wallet) => {
+        const visible = (field: WalletBalanceField): string => (
+          scopedBalanceFields === null || scopedBalanceFields.has(field)
+            ? wallet[field].toString()
+            : '0'
+        )
+        return {
+          id: wallet.id,
+          walletId: wallet.walletId,
+          timestamp: wallet.timestamp,
+          notify: wallet.notify,
+          ICCYYN: visible('ICCYYN'),
+          FIT: visible('FIT'),
+          TGT: visible('TGT'),
+          INT: visible('INT'),
+          GRN: visible('GRN'),
+          YYN: visible('YYN'),
+          EVT: visible('EVT'),
+          HLT: visible('HLT'),
+          SCT: visible('SCT'),
+          GVT: visible('GVT'),
+        }
+      }),
       total,
       page,
       totalPages: Math.ceil(total / limit),
+      visibleTokens,
     })
   } catch (error) {
     console.error('Wallets error:', error)

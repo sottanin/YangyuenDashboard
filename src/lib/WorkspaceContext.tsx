@@ -34,7 +34,7 @@ const WorkspaceContext = createContext<WorkspaceContextValue>({
   refresh: () => {},
 })
 
-export function WorkspaceProvider({ children, allowAllWorkspaces }: { children: React.ReactNode; allowAllWorkspaces: boolean }) {
+export function WorkspaceProvider({ children }: { children: React.ReactNode; allowAllWorkspaces: boolean }) {
   const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([])
   const [selected, setSelectedState] = useState<WorkspaceOption>(ALL_WORKSPACES)
   const [loading, setLoading] = useState(true)
@@ -53,7 +53,7 @@ export function WorkspaceProvider({ children, allowAllWorkspaces }: { children: 
             if (typeof candidate.id !== 'number' || !Number.isInteger(candidate.id) || candidate.id <= 0 || typeof candidate.name !== 'string') return null
             return { id: candidate.id, name: candidate.name }
           })
-          .filter((workspace): workspace is WorkspaceOption => workspace !== null)
+          .filter((workspace): workspace is WorkspaceOption => workspace !== null && workspace.name.trim().toUpperCase() !== 'SYSTEM')
         setWorkspaces(options)
         setSelectedState((current) => {
           if (!restoredSelection.current) {
@@ -62,8 +62,8 @@ export function WorkspaceProvider({ children, allowAllWorkspaces }: { children: 
               const stored = localStorage.getItem('nx-workspace')
               if (stored) {
                 const parsed: unknown = JSON.parse(stored)
-                if (isWorkspaceOption(parsed) && ((allowAllWorkspaces && parsed.id === 'all') || options.some((workspace) => workspace.id === parsed.id))) {
-                  return parsed.id === 'all' ? ALL_WORKSPACES : parsed
+                if (isWorkspaceOption(parsed) && parsed.id !== 'all' && options.some((workspace) => workspace.id === parsed.id)) {
+                  return parsed
                 }
                 localStorage.removeItem('nx-workspace')
               }
@@ -71,7 +71,7 @@ export function WorkspaceProvider({ children, allowAllWorkspaces }: { children: 
               // Storage can be unavailable in hardened/private browser contexts.
             }
           }
-          return (allowAllWorkspaces && current.id === 'all') || options.some((workspace) => workspace.id === current.id)
+          return options.some((workspace) => workspace.id === current.id)
             ? current
             : options[0] ?? ALL_WORKSPACES
         })
@@ -83,7 +83,7 @@ export function WorkspaceProvider({ children, allowAllWorkspaces }: { children: 
     } finally {
       if (!signal?.aborted) setLoading(false)
     }
-  }, [allowAllWorkspaces])
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()

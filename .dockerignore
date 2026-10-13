@@ -9,7 +9,12 @@ yarn-error.log*
 .env
 .env.*
 .claude
+.codex
+.information
+.playwright-cli
+output
 coverage
+*.log
 *.tsbuildinfo
 *.xlsx
 ~$*

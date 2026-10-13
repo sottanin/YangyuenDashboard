@@ -4,6 +4,7 @@ import { MENU_CATALOG } from '@/lib/auth/menuCatalog'
 import { prisma } from '@/lib/prisma'
 
 interface RouteContext { params: Promise<{ id: string }> }
+const retiredMenuKeys = new Set(['reports', 'transactions'])
 
 export async function PUT(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const admin = await getCurrentAdmin()
@@ -21,9 +22,10 @@ export async function PUT(request: NextRequest, { params }: RouteContext): Promi
   const description = source.description === undefined ? current.description : typeof source.description === 'string' ? source.description.trim() : ''
   if (!name || name.length > 80 || (description?.length ?? 0) > 500) return NextResponse.json({ error: 'Invalid role name or description' }, { status: 400 })
   if (!Array.isArray(source.menuKeys) || !source.menuKeys.every((key) => typeof key === 'string')) return NextResponse.json({ error: 'Invalid menu permission' }, { status: 400 })
-  const permissions = Array.from(new Set(source.menuKeys))
+  const submittedPermissions = Array.from(new Set(source.menuKeys))
   const validKeys = new Set<string>(MENU_CATALOG.map((menu) => menu.key))
-  if (!permissions.every((key) => validKeys.has(key))) return NextResponse.json({ error: 'Invalid menu permission' }, { status: 400 })
+  if (!submittedPermissions.every((key) => validKeys.has(key) || retiredMenuKeys.has(key))) return NextResponse.json({ error: 'Invalid menu permission' }, { status: 400 })
+  const permissions = submittedPermissions.filter((key) => validKeys.has(key))
   const role = await prisma.$transaction(async (tx) => {
     await tx.roleMenuPermission.deleteMany({ where: { roleId: id } })
     return tx.adminRole.update({

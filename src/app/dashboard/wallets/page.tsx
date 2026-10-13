@@ -9,14 +9,25 @@ import { SkeletonKpi, SkeletonCard } from '@/components/ui/SkeletonCard'
 import { Icon } from '@/components/ui/Icon'
 import { useWorkspace } from '@/lib/WorkspaceContext'
 
-interface WalletRow {
+type WalletBalanceField = 'ICCYYN' | 'FIT' | 'TGT' | 'INT' | 'GRN' | 'YYN' | 'EVT' | 'HLT' | 'SCT' | 'GVT'
+
+interface WalletRow extends Record<WalletBalanceField, string> {
   id: string
   walletId: string
-  ICCYYN: string
-  FIT: string
-  TGT: string
-  INT: string
-  GRN: string
+}
+
+interface VisibleToken {
+  field: WalletBalanceField
+  name: string
+  symbol: string
+  standard: string
+}
+
+interface WalletResponse {
+  wallets: WalletRow[]
+  visibleTokens: VisibleToken[]
+  total: number
+  totalPages: number
 }
 
 function trunc(s: string) {
@@ -31,6 +42,7 @@ export default function WalletsPage() {
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [visibleTokens, setVisibleTokens] = useState<VisibleToken[]>([])
 
   const requestId = useRef(0)
 
@@ -40,14 +52,16 @@ export default function WalletsPage() {
     try {
       const res = await fetch(`/api/wallets?page=${p}&limit=20&workspace=${encodeURIComponent(String(selected.id))}`, { signal })
       if (!res.ok) throw new Error('Failed to load wallets')
-      const data = await res.json()
+      const data = await res.json() as WalletResponse
       if (id !== requestId.current) return
       setWallets(data.wallets || [])
+      setVisibleTokens(data.visibleTokens || [])
       setTotal(data.total || 0)
       setTotalPages(data.totalPages || 1)
     } catch {
       if (signal?.aborted || id !== requestId.current) return
       setWallets([])
+      setVisibleTokens([])
     } finally {
       if (id === requestId.current) setLoading(false)
     }
@@ -61,30 +75,29 @@ export default function WalletsPage() {
     return () => controller.abort()
   }, [fetchWallets, page])
 
-  // Compute KPI values from wallets data
-  const topICC = wallets.length > 0 ? Math.max(...wallets.map(w => parseFloat(w.ICCYYN))) : 0
-  const topGreen = wallets.length > 0 ? Math.max(...wallets.map(w => parseFloat(w.GRN))) : 0
+  const primaryToken = visibleTokens.find((token) => token.standard === 'KAP-20') ?? visibleTokens[0]
+  const secondaryToken = visibleTokens.find((token) => token.standard === 'KAP-22')
+  const balance = (wallet: WalletRow, token: VisibleToken | undefined): number => token ? Number.parseFloat(wallet[token.field]) || 0 : 0
+  const topPrimary = wallets.length > 0 ? Math.max(...wallets.map((wallet) => balance(wallet, primaryToken))) : 0
+  const topSecondary = wallets.length > 0 ? Math.max(...wallets.map((wallet) => balance(wallet, secondaryToken))) : 0
   const avgTotal = wallets.length > 0
-    ? wallets.reduce((s, w) =>
-        s + parseFloat(w.ICCYYN) + parseFloat(w.GRN) + parseFloat(w.TGT) + parseFloat(w.INT) + parseFloat(w.FIT), 0
-      ) / wallets.length
+    ? wallets.reduce((sum, wallet) => sum + visibleTokens.reduce((tokenSum, token) => tokenSum + balance(wallet, token), 0), 0) / wallets.length
     : 0
 
-  // Distribution chart data (mock buckets)
-  const ICC_BUCKETS = [
+  const primaryBuckets = [
     { label: '0', value: 0 },
     { label: '1–100', value: 0 },
     { label: '101–500', value: 0 },
     { label: '501–2K', value: 0 },
     { label: '2K+', value: 0 },
   ]
-  wallets.forEach(w => {
-    const v = parseFloat(w.ICCYYN)
-    if (v === 0) ICC_BUCKETS[0].value++
-    else if (v <= 100) ICC_BUCKETS[1].value++
-    else if (v <= 500) ICC_BUCKETS[2].value++
-    else if (v <= 2000) ICC_BUCKETS[3].value++
-    else ICC_BUCKETS[4].value++
+  wallets.forEach((wallet) => {
+    const value = balance(wallet, primaryToken)
+    if (value === 0) primaryBuckets[0].value++
+    else if (value <= 100) primaryBuckets[1].value++
+    else if (value <= 500) primaryBuckets[2].value++
+    else if (value <= 2000) primaryBuckets[3].value++
+    else primaryBuckets[4].value++
   })
 
   return (
@@ -107,9 +120,9 @@ export default function WalletsPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           <KpiTile label="Total Wallets" value={total.toLocaleString()} change={4.8}
             spark={[40,42,45,46,48,50,52,54,56,58,60,62]} icon="users" />
-          <KpiTile label="Top ICC Balance" value={topICC.toFixed(0)} change={12.4}
+          <KpiTile label={`Top ${primaryToken?.symbol ?? 'KAP-20'} Balance`} value={topPrimary.toFixed(0)} change={12.4}
             spark={[20,22,24,26,25,28,30,32,34,36,38,40]} icon="pulse" sparkColor="var(--success)" />
-          <KpiTile label="Top Green Balance" value={topGreen.toFixed(0)} change={2.1}
+          <KpiTile label={`Top ${secondaryToken?.symbol ?? 'KAP-22'} Balance`} value={topSecondary.toFixed(0)} change={2.1}
             spark={[30,31,32,31,32,33,34,33,34,34,34,34]} icon="box" sparkColor="var(--accent-3)" />
           <KpiTile label="Avg Total Balance" value={avgTotal.toFixed(0)} change={-0.4}
             spark={[2.5,2.4,2.4,2.3,2.3,2.2,2.2,2.2,2.1,2.1,2.1,2.1]} icon="activity" sparkColor="var(--accent-2)" />
@@ -118,10 +131,10 @@ export default function WalletsPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
         <div className="xl:col-span-2">
-          <Card title="ICC-YANGYUEN Balance Distribution" subtitle="Wallets bucketed by balance range">
+          <Card title={`${primaryToken?.name ?? 'KAP-20'} Balance Distribution`} subtitle="Wallets bucketed by balance range">
             {loading ? <SkeletonCard height={260} /> : (
               <BarChart
-                data={ICC_BUCKETS}
+                data={primaryBuckets}
                 height={240}
                 color="var(--accent)"
               />
@@ -130,21 +143,19 @@ export default function WalletsPage() {
         </div>
         <Card title="Token Summary" subtitle="Across all wallets">
           <div className="space-y-3 mt-1">
-            {['ICC-YANGYUEN', 'Green', 'Together', 'Integrity', 'Fit'].map((name, i) => {
-              const keys = ['ICCYYN', 'GRN', 'TGT', 'INT', 'FIT'] as const
-              const key = keys[i]
-              const sum = wallets.reduce((s, w) => s + parseFloat(w[key]), 0)
-              const max = wallets.length > 0 ? Math.max(...wallets.map(w => parseFloat(w[key]))) : 1
+            {visibleTokens.map((token, index) => {
+              const sum = wallets.reduce((totalBalance, wallet) => totalBalance + balance(wallet, token), 0)
+              const max = wallets.length > 0 ? Math.max(...wallets.map((wallet) => balance(wallet, token))) : 1
               const pct = max > 0 ? Math.min(100, (sum / (max * wallets.length)) * 100) : 0
               const colors = ['rgb(99 102 241)', 'rgb(6 182 212)', 'rgb(139 92 246)', 'rgb(16 185 129)', 'rgb(245 158 11)']
               return (
-                <div key={name}>
+                <div key={token.field}>
                   <div className="flex items-center justify-between text-xs mb-1.5">
-                    <span className="font-medium text-default">{name}</span>
+                    <span className="font-medium text-default">{token.name} ({token.symbol})</span>
                     <span className="font-mono text-muted">{sum.toFixed(0)}</span>
                   </div>
                   <div className="progress-track">
-                    <div className="progress-bar" style={{ width: `${pct}%`, background: colors[i] }} />
+                    <div className="progress-bar" style={{ width: `${pct}%`, background: colors[index % colors.length] }} />
                   </div>
                 </div>
               )
@@ -153,7 +164,7 @@ export default function WalletsPage() {
         </Card>
       </div>
 
-      <Card title="All Wallets" subtitle="Sorted by ICC-YANGYUEN balance (desc)" noPad>
+      <Card title="All Wallets" subtitle={`Balances for ${visibleTokens.map((token) => token.symbol).join(', ') || 'the selected workspace'}`} noPad>
         {loading ? (
           <div className="p-5 space-y-3">
             {[0,1,2,3,4].map(i => (
@@ -177,22 +188,14 @@ export default function WalletsPage() {
                 <thead>
                   <tr className="text-[10.5px] uppercase tracking-wider text-faint border-b border-default">
                     <th className="text-left font-medium px-5 py-3">Wallet Address</th>
-                    <th className="text-right font-medium px-3 py-3">ICC-YANGYUEN</th>
-                    <th className="text-right font-medium px-3 py-3">Green</th>
-                    <th className="text-right font-medium px-3 py-3">Together</th>
-                    <th className="text-right font-medium px-3 py-3">Integrity</th>
-                    <th className="text-right font-medium px-3 py-3">Fit</th>
+                    {visibleTokens.map((token) => <th key={token.field} className="text-right font-medium px-3 py-3">{token.symbol}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {wallets.map((w) => (
                     <tr key={w.id} className="tbl-row border-b border-default last:border-0">
                       <td className="px-5 py-3 font-mono text-xs text-default">{trunc(w.walletId)}</td>
-                      <td className="px-3 py-3 text-right font-mono text-xs text-default">{parseFloat(w.ICCYYN).toFixed(2)}</td>
-                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.GRN).toFixed(2)}</td>
-                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.TGT).toFixed(2)}</td>
-                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.INT).toFixed(2)}</td>
-                      <td className="px-3 py-3 text-right font-mono text-xs text-muted">{parseFloat(w.FIT).toFixed(2)}</td>
+                      {visibleTokens.map((token) => <td key={token.field} className="px-3 py-3 text-right font-mono text-xs text-muted">{balance(w, token).toFixed(2)}</td>)}
                     </tr>
                   ))}
                 </tbody>

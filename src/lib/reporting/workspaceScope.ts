@@ -19,6 +19,12 @@ export function parseWorkspaceSelection(value: string | null): number | 'all' | 
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
 }
 
+export async function isSelectableReportWorkspace(selection: number | 'all'): Promise<boolean> {
+  if (selection === 'all') return false
+  const workspace = await prisma.workspace.findUnique({ where: { id: selection }, select: { name: true } })
+  return Boolean(workspace && workspace.name.trim().toUpperCase() !== 'SYSTEM')
+}
+
 export async function getWorkspaceReportScope(selection: number | 'all'): Promise<WorkspaceReportScope> {
   if (selection === 'all') return { workspaceId: null, tokenAddresses: null }
   const selectedWorkspace = await prisma.workspace.findUnique({ where: { id: selection }, select: { id: true } })

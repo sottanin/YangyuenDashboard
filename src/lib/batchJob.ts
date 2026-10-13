@@ -1,6 +1,10 @@
 import { prisma } from './prisma'
 import { Prisma } from '@prisma/client'
-import { isValidAddress, normalizeAddress, TOKEN_ADDRESSES } from './system/addresses'
+import { isValidAddress, normalizeAddress } from './system/addresses'
+import {
+  WALLET_BALANCE_FIELD_BY_TOKEN_ADDRESS,
+  type WalletBalanceField,
+} from './walletBalances'
 
 const KUBSCAN_BASE = 'https://www.kubscan.com/api/v2/tokens'
 const KUBSCAN_ADDR = 'https://www.kubscan.com/api/v2/addresses'
@@ -239,16 +243,6 @@ interface TokenBalanceItem {
   value?: string
 }
 
-type BalanceField = 'ICCYYN' | 'FIT' | 'TGT' | 'INT' | 'GRN'
-
-const WALLET_BALANCE_FIELDS_BY_TOKEN_ADDRESS: Readonly<Record<string, BalanceField>> = {
-  [normalizeAddress(TOKEN_ADDRESSES.iccyyn)]: 'ICCYYN',
-  [normalizeAddress(TOKEN_ADDRESSES.fit)]: 'FIT',
-  [normalizeAddress(TOKEN_ADDRESSES.tgt)]: 'TGT',
-  [normalizeAddress(TOKEN_ADDRESSES.int)]: 'INT',
-  [normalizeAddress(TOKEN_ADDRESSES.grn)]: 'GRN',
-}
-
 const CANONICAL_TOKEN_DECIMALS = 18
 const MAX_UINT256_DECIMAL_DIGITS = 78
 const MAX_TOKEN_BALANCE_RESPONSE_BYTES = 1_000_000
@@ -277,14 +271,14 @@ async function readTokenBalanceResponse(res: Response): Promise<TokenBalanceItem
 }
 
 export function mapCanonicalTokenBalance(item: unknown):
-  | { field: BalanceField; value: Prisma.Decimal }
+  | { field: WalletBalanceField; value: Prisma.Decimal }
   | null {
   if (typeof item !== 'object' || item === null) return null
   const candidate = item as TokenBalanceItem
   const address = candidate.token?.address
   if (typeof address !== 'string') return null
 
-  const field = WALLET_BALANCE_FIELDS_BY_TOKEN_ADDRESS[normalizeAddress(address)]
+  const field = WALLET_BALANCE_FIELD_BY_TOKEN_ADDRESS[normalizeAddress(address)]
   if (!field) return null
 
   const decimalsText = candidate.token?.decimals
@@ -308,13 +302,18 @@ export function mapCanonicalTokenBalance(item: unknown):
   }
 }
 
-function zeroWalletBalances(): Record<BalanceField, Prisma.Decimal> {
+function zeroWalletBalances(): Record<WalletBalanceField, Prisma.Decimal> {
   return {
     ICCYYN: new Prisma.Decimal(0),
     FIT: new Prisma.Decimal(0),
     TGT: new Prisma.Decimal(0),
     INT: new Prisma.Decimal(0),
     GRN: new Prisma.Decimal(0),
+    YYN: new Prisma.Decimal(0),
+    EVT: new Prisma.Decimal(0),
+    HLT: new Prisma.Decimal(0),
+    SCT: new Prisma.Decimal(0),
+    GVT: new Prisma.Decimal(0),
   }
 }
 
@@ -400,7 +399,7 @@ export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
     totalFetched = allWallets.length
     console.log(`[WalletSync] Fetching balances for ${totalFetched} wallets`)
 
-    const snapshots = new Map<string, Record<BalanceField, Prisma.Decimal>>()
+    const snapshots = new Map<string, Record<WalletBalanceField, Prisma.Decimal>>()
 
     for (const wallet of allWallets) {
       const currentLog = await prisma.batchJobLog.findUnique({

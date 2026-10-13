@@ -139,6 +139,11 @@ model Wallet {
   TGT              Decimal   @default(0)
   INT              Decimal   @default(0)
   GRN              Decimal   @default(0)
+  YYN              Decimal   @default(0)
+  EVT              Decimal   @default(0)
+  HLT              Decimal   @default(0)
+  SCT              Decimal   @default(0)
+  GVT              Decimal   @default(0)
 
   @@index([walletId])
 }

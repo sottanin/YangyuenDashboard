@@ -2,16 +2,12 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { classifyFlow, type FlowClassification } from './classifyFlow'
 import { getReportingConfig } from '@/lib/system/config'
-import { normalizeAddress, TOKEN_ADDRESSES } from '@/lib/system/addresses'
+import { normalizeAddress } from '@/lib/system/addresses'
+import { walletBalanceColumnForTokenAddress, walletBalanceFieldForTokenAddress } from '@/lib/walletBalances'
 import { getWorkspaceReportScope, type WorkspaceReportScope } from './workspaceScope'
 import { reportingDaySql } from './reportingDay'
 
-const CANONICAL_POINT_TOKENS = [
-  normalizeAddress(TOKEN_ADDRESSES.fit),
-  normalizeAddress(TOKEN_ADDRESSES.grn),
-  normalizeAddress(TOKEN_ADDRESSES.int),
-  normalizeAddress(TOKEN_ADDRESSES.tgt),
-] as const
+const POINT_TOKEN_SYMBOL_ORDER = ['FIT', 'GRN', 'INT', 'TGT', 'EVT', 'HLT', 'SCT', 'GVT'] as const
 
 const MAX_DAILY_CHART_POINTS = 4_000
 
@@ -92,14 +88,6 @@ interface TopUserRow {
   amount: Prisma.Decimal | string
 }
 
-function walletBalanceColumn(normalizedToken: string): Prisma.Sql {
-  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.fit)) return Prisma.raw('"FIT"')
-  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.grn)) return Prisma.raw('"GRN"')
-  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.int)) return Prisma.raw('"INT"')
-  if (normalizedToken === normalizeAddress(TOKEN_ADDRESSES.tgt)) return Prisma.raw('"TGT"')
-  throw new Error('Unsupported KAP-22 token address')
-}
-
 interface ReportContext {
   token: Kap22TokenOption
   normalizedToken: string
@@ -138,19 +126,24 @@ function addressSql(addresses: string[]): Prisma.Sql {
 
 export async function listKap22Tokens(workspaceSelection: number | 'all'): Promise<Kap22TokenOption[]> {
   await getWorkspaceReportScope(workspaceSelection)
-  const canonicalOrder = new Map(CANONICAL_POINT_TOKENS.map((address, index) => [address, index]))
+  const preferredOrder = new Map<string, number>(POINT_TOKEN_SYMBOL_ORDER.map((symbol, index) => [symbol, index]))
   const contracts = await prisma.tokenContract.findMany({
     where: {
       active: true,
       role: 'POINT_TOKEN',
       standard: 'KAP-22',
-      normalizedAddress: { in: [...CANONICAL_POINT_TOKENS] },
       ...(workspaceSelection === 'all' ? {} : { workspaceId: workspaceSelection }),
     },
     select: { id: true, name: true, symbol: true, address: true, normalizedAddress: true, imageKey: true },
   })
   return contracts
-    .sort((left, right) => (canonicalOrder.get(left.normalizedAddress) ?? 99) - (canonicalOrder.get(right.normalizedAddress) ?? 99))
+    .filter((contract) => walletBalanceFieldForTokenAddress(contract.normalizedAddress) !== null)
+    .sort((left, right) => {
+      const leftSymbol = (left.symbol ?? left.name).toUpperCase()
+      const rightSymbol = (right.symbol ?? right.name).toUpperCase()
+      const orderDifference = (preferredOrder.get(leftSymbol) ?? 99) - (preferredOrder.get(rightSymbol) ?? 99)
+      return orderDifference !== 0 ? orderDifference : left.name.localeCompare(right.name)
+    })
     .map((contract) => ({ id: contract.id, name: contract.name, symbol: contract.symbol ?? contract.name, address: contract.address, imageUrl: contract.imageKey ? `/api/contracts/token/${contract.id}/image` : null }))
 }
 
@@ -376,7 +369,7 @@ export async function getKap22TopUsers(tokenAddress: string, workspaceSelection:
   const context = await reportContext(tokenAddress, workspaceSelection)
   if (!context) return null
   const poolSql = addressSql([...context.distributorAddresses, ...context.operationAddresses])
-  const balanceColumn = walletBalanceColumn(context.normalizedToken)
+  const balanceColumn = walletBalanceColumnForTokenAddress(context.normalizedToken)
   const tokenScopeSql = context.scope.tokenAddresses === null
     ? Prisma.empty
     : Prisma.sql`AND LOWER(detail."tokenAddress") IN (${Prisma.join(context.scope.tokenAddresses)})`

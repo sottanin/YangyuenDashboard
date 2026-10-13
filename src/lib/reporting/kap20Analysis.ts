@@ -2,11 +2,12 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { classifyFlow } from './classifyFlow'
 import { getReportingConfig } from '@/lib/system/config'
-import { normalizeAddress, TOKEN_ADDRESSES } from '@/lib/system/addresses'
+import { normalizeAddress } from '@/lib/system/addresses'
+import { walletBalanceColumnForTokenAddress, walletBalanceFieldForTokenAddress } from '@/lib/walletBalances'
 import { getWorkspaceReportScope } from './workspaceScope'
 import { reportingDaySql } from './reportingDay'
 
-interface AggregateRow { mint: Prisma.Decimal | null; backup_balance: Prisma.Decimal | null; user_balance: Prisma.Decimal | null; redemption: Prisma.Decimal | null }
+interface AggregateRow { mint: Prisma.Decimal | null; backup_balance: Prisma.Decimal | null; workspace_balance: Prisma.Decimal | null; user_balance: Prisma.Decimal | null; user_transaction_balance: Prisma.Decimal | null; redemption: Prisma.Decimal | null }
 interface DailyRow { day: Date | string; total_transactions: bigint; total_amount: Prisma.Decimal | null }
 interface TopRow { wallet_address: string; amount: Prisma.Decimal }
 interface WalletBalanceRow { normalized_address: string; balance: Prisma.Decimal | null }
@@ -20,10 +21,58 @@ function addressArray(values: string[]): Prisma.Sql {
 async function context(workspace: number | 'all') {
   const [scope, config, token, addresses] = await Promise.all([
     getWorkspaceReportScope(workspace), getReportingConfig(),
-    prisma.tokenContract.findFirst({ where: { normalizedAddress: normalizeAddress(TOKEN_ADDRESSES.iccyyn), active: true, ...(workspace === 'all' ? {} : { workspaceId: workspace }) }, select: { id: true, name: true, symbol: true, address: true, imageKey: true } }),
+    prisma.tokenContract.findFirst({
+      where: {
+        active: true,
+        role: 'PRIMARY_TOKEN',
+        standard: 'KAP-20',
+        ...(workspace === 'all' ? {} : { workspaceId: workspace }),
+      },
+      select: { id: true, name: true, symbol: true, address: true, imageKey: true },
+      orderBy: [{ workspaceId: 'asc' }, { name: 'asc' }],
+    }),
     prisma.addressContract.findMany({ where: { role: { in: ['ZERO', 'INITIAL_MINT', 'MAIN', 'WORKSPACE', 'LOYALTY_SWAP', 'MARKETPLACE'] }, ...(workspace === 'all' ? {} : { OR: [{ workspaceId: workspace }, { workspace: { name: 'SYSTEM' } }] }) }, select: { role: true, normalizedAddress: true } }),
   ])
-  if (!token) return null
+  if (!token || !walletBalanceFieldForTokenAddress(token.address)) return null
+  const configuredHistoryStart = new Date(config.businessHistoryStart)
+  const zeroWallets = addresses.filter((row) => row.role === 'ZERO').map((row) => row.normalizedAddress)
+  const initialMintWallets = addresses.filter((row) => row.role === 'INITIAL_MINT').map((row) => row.normalizedAddress)
+  const registeredWorkspaceWallets = addresses.filter((row) => row.role === 'WORKSPACE').map((row) => row.normalizedAddress)
+  const explicitMainWallets = addresses.filter((row) => row.role === 'MAIN').map((row) => row.normalizedAddress)
+  const historyLookback = new Date(configuredHistoryStart.getTime() - 24 * 60 * 60 * 1000)
+  const [earliestRegisteredMint, inferredMainTransfers] = await Promise.all([
+    zeroWallets.length === 0
+      ? null
+      : prisma.transactionDetail.findFirst({
+          where: {
+            tokenAddress: { equals: token.address, mode: 'insensitive' },
+            fromHash: { in: zeroWallets, mode: 'insensitive' },
+            timestamp: { gte: historyLookback },
+          },
+          orderBy: [{ timestamp: 'asc' }, { key: 'asc' }],
+          select: { timestamp: true },
+        }),
+    explicitMainWallets.length > 0 || initialMintWallets.length === 0 || registeredWorkspaceWallets.length === 0
+      ? []
+      : prisma.transactionDetail.findMany({
+          where: {
+            tokenAddress: { equals: token.address, mode: 'insensitive' },
+            fromHash: { in: initialMintWallets, mode: 'insensitive' },
+            toHash: { in: registeredWorkspaceWallets, mode: 'insensitive' },
+          },
+          distinct: ['toHash'],
+          select: { toHash: true },
+        }),
+  ])
+  // Some workspaces predate the MAIN role. Infer that wallet only from the
+  // canonical initial-supply transfer, never from a mutable display name.
+  const inferredMainWallets = inferredMainTransfers.map((row) => normalizeAddress(row.toHash))
+  const mainWallets = explicitMainWallets.length > 0 ? explicitMainWallets : inferredMainWallets
+  const mainSet = new Set(mainWallets)
+  const workspaceWallets = registeredWorkspaceWallets.filter((address) => !mainSet.has(address))
+  const historyStart = earliestRegisteredMint && earliestRegisteredMint.timestamp < configuredHistoryStart
+    ? earliestRegisteredMint.timestamp
+    : configuredHistoryStart
   const pointContracts = await prisma.tokenContract.findMany({
     // Include inactive contracts so registry lifecycle changes do not erase
     // historical ICCYYN lock and swap legs from this balance.
@@ -31,7 +80,7 @@ async function context(workspace: number | 'all') {
     select: { id: true, name: true, symbol: true, address: true, normalizedAddress: true, imageKey: true, active: true },
     orderBy: [{ name: 'asc' }, { normalizedAddress: 'asc' }],
   })
-  return { scope, historyStart: new Date(config.businessHistoryStart), timezone: config.reportingTimezone, token: { id: token.id, name: token.name, symbol: token.symbol ?? 'ICCYYN', address: token.address, imageUrl: token.imageKey ? `/api/contracts/token/${token.id}/image` : null }, zero: addresses.filter((row) => row.role === 'ZERO').map((row) => row.normalizedAddress), initialMintWallets: addresses.filter((row) => row.role === 'INITIAL_MINT').map((row) => row.normalizedAddress), main: addresses.filter((row) => row.role === 'MAIN').map((row) => row.normalizedAddress), workspaceWallets: addresses.filter((row) => row.role === 'WORKSPACE').map((row) => row.normalizedAddress), loyaltySwaps: addresses.filter((row) => row.role === 'LOYALTY_SWAP').map((row) => row.normalizedAddress), marketplaces: addresses.filter((row) => row.role === 'MARKETPLACE').map((row) => row.normalizedAddress), pointContracts }
+  return { scope, historyStart, timezone: config.reportingTimezone, token: { id: token.id, name: token.name, symbol: token.symbol ?? token.name, address: token.address, imageUrl: token.imageKey ? `/api/contracts/token/${token.id}/image` : null }, zero: zeroWallets, initialMintWallets, main: mainWallets, workspaceWallets, loyaltySwaps: addresses.filter((row) => row.role === 'LOYALTY_SWAP').map((row) => row.normalizedAddress), marketplaces: addresses.filter((row) => row.role === 'MARKETPLACE').map((row) => row.normalizedAddress), pointContracts }
 }
 
 export async function listKap20Tokens(workspace: number | 'all') {
@@ -42,8 +91,9 @@ export async function listKap20Tokens(workspace: number | 'all') {
 export async function getKap20Summary(tokenAddress: string, workspace: number | 'all') {
   const value = await context(workspace)
   if (!value || normalizeAddress(tokenAddress) !== normalizeAddress(value.token.address)) return null
-  const zero = addressArray(value.zero); const main = addressArray(value.main); const incomingWallets = addressArray([...value.initialMintWallets, ...value.workspaceWallets]); const outgoingTargets = addressArray([...value.loyaltySwaps, ...value.workspaceWallets]); const marketplace = addressArray(value.marketplaces); const pointContractAddresses = value.pointContracts.map((contract) => contract.normalizedAddress); const pointContracts = addressArray(pointContractAddresses)
+  const zero = addressArray(value.zero); const main = addressArray(value.main); const workspaceWalletAddresses = addressArray(value.workspaceWallets); const incomingWallets = addressArray([...value.initialMintWallets, ...value.workspaceWallets]); const outgoingTargets = addressArray([...value.loyaltySwaps, ...value.workspaceWallets]); const marketplace = addressArray(value.marketplaces); const pointContractAddresses = value.pointContracts.map((contract) => contract.normalizedAddress); const pointContracts = addressArray(pointContractAddresses)
   const token = normalizeAddress(value.token.address)
+  const balanceColumn = walletBalanceColumnForTokenAddress(token)
   const reportingDay = reportingDaySql(Prisma.raw('"timestamp"'), value.timezone)
   const [totals, days, walletBalances, pointTokenPerformance] = await Promise.all([
     prisma.$queryRaw<AggregateRow[]>(Prisma.sql`
@@ -52,22 +102,43 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
       SELECT
         COALESCE(SUM(CASE WHEN LOWER("fromHash") = ANY(${zero}) THEN "value" ELSE 0 END), 0) mint,
         COALESCE(SUM(CASE WHEN LOWER("toHash") = ANY(${main}) THEN "value" ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN LOWER("fromHash") = ANY(${main}) THEN "value" ELSE 0 END), 0) backup_balance,
+        COALESCE(SUM(CASE WHEN LOWER("toHash") = ANY(${workspaceWalletAddresses}) THEN "value" ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN LOWER("fromHash") = ANY(${workspaceWalletAddresses}) THEN "value" ELSE 0 END), 0) workspace_balance,
         (SELECT COALESCE(SUM(snapshot.balance), 0)
           FROM (
-            SELECT LOWER(wallet."walletId") AS normalized_address, wallet."ICCYYN" AS balance,
+            SELECT LOWER(wallet."walletId") AS normalized_address, wallet.${balanceColumn} AS balance,
               ROW_NUMBER() OVER (PARTITION BY LOWER(wallet."walletId") ORDER BY wallet."timestamp" DESC NULLS LAST, wallet.id DESC) AS snapshot_rank
             FROM "Wallet" wallet
           ) snapshot
           WHERE snapshot.snapshot_rank = 1
             AND NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = snapshot.normalized_address)
             AND EXISTS (SELECT 1 FROM events evidence WHERE LOWER(evidence."fromHash") = snapshot.normalized_address OR LOWER(evidence."toHash") = snapshot.normalized_address)) user_balance,
+        COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(events."toHash")) THEN "value" ELSE 0 END), 0)
+          - COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(events."fromHash")) THEN "value" ELSE 0 END), 0) user_transaction_balance,
         COALESCE(SUM(CASE WHEN LOWER("toHash") = ANY(${marketplace}) AND NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(events."fromHash")) THEN "value" ELSE 0 END), 0) redemption
       FROM events
     `),
-    prisma.$queryRaw<DailyRow[]>(Prisma.sql`SELECT ${reportingDay} AS "day", COUNT(DISTINCT "txId")::bigint AS total_transactions, COALESCE(SUM("value"), 0) AS total_amount FROM "TransactionDetail" WHERE LOWER("tokenAddress") = ${token} AND "timestamp" >= ${value.historyStart} GROUP BY "day" ORDER BY "day"`),
+    prisma.$queryRaw<DailyRow[]>(Prisma.sql`
+      WITH registered AS (
+        SELECT "normalizedAddress" FROM "TokenContract"
+        UNION
+        SELECT "normalizedAddress" FROM "AddressContract"
+      )
+      SELECT ${reportingDay} AS "day",
+        COUNT(DISTINCT detail."txId")::bigint AS total_transactions,
+        COALESCE(SUM(detail."value"), 0) AS total_amount
+      FROM "TransactionDetail" detail
+      WHERE LOWER(detail."tokenAddress") = ${token}
+        AND detail."timestamp" >= ${value.historyStart}
+        AND NOT EXISTS (
+          SELECT 1 FROM registered registry
+          WHERE registry."normalizedAddress" = LOWER(detail."toHash")
+        )
+      GROUP BY "day"
+      ORDER BY "day"
+    `),
     prisma.$queryRaw<WalletBalanceRow[]>(Prisma.sql`
       WITH ranked AS (
-        SELECT LOWER("walletId") AS normalized_address, "ICCYYN" AS balance,
+        SELECT LOWER("walletId") AS normalized_address, ${balanceColumn} AS balance,
           ROW_NUMBER() OVER (PARTITION BY LOWER("walletId") ORDER BY "timestamp" DESC NULLS LAST, id DESC) AS row_number
         FROM "Wallet"
         WHERE LOWER("walletId") = ANY(${addressArray([...value.workspaceWallets, ...pointContractAddresses])})
@@ -91,8 +162,18 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
   const balances = new Map(walletBalances.map((row) => [row.normalized_address, amount(row.balance)]))
   const performance = new Map(pointTokenPerformance.map((row) => [row.normalized_address, { incoming: amount(row.incoming_transfers), outgoing: amount(row.outgoing_transfers) }]))
   const sumBalances = (addresses: string[]): string => addresses.reduce((sum, address) => sum.add(new Prisma.Decimal(balances.get(address) ?? '0')), new Prisma.Decimal(0)).toString()
-  const workspaceWallet = sumBalances(value.workspaceWallets)
-  const distributorPool = sumBalances(pointContractAddresses)
+  const snapshotWorkspaceWallet = new Prisma.Decimal(sumBalances(value.workspaceWallets))
+  const transactionWorkspaceWallet = new Prisma.Decimal(amount(total?.workspace_balance))
+  const workspaceWallet = (snapshotWorkspaceWallet.isZero() && !transactionWorkspaceWallet.isZero() ? transactionWorkspaceWallet : snapshotWorkspaceWallet).toString()
+  const snapshotDistributorPool = new Prisma.Decimal(sumBalances(pointContractAddresses))
+  const transactionDistributorPool = Array.from(performance.values()).reduce(
+    (sum, row) => sum.add(new Prisma.Decimal(row.incoming)).sub(new Prisma.Decimal(row.outgoing)),
+    new Prisma.Decimal(0),
+  )
+  const distributorPool = (snapshotDistributorPool.isZero() && !transactionDistributorPool.isZero() ? transactionDistributorPool : snapshotDistributorPool).toString()
+  const snapshotUserBalance = new Prisma.Decimal(amount(total?.user_balance))
+  const transactionUserBalance = new Prisma.Decimal(amount(total?.user_transaction_balance))
+  const userWallet = (snapshotUserBalance.isZero() && !transactionUserBalance.isZero() ? transactionUserBalance : snapshotUserBalance).toString()
   const pointTokenLocks = value.pointContracts.map((contract) => ({
     id: contract.id,
     name: contract.name,
@@ -109,7 +190,7 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
     backupWallet: amount(total?.backup_balance),
     workspaceWallet,
     distributorPool,
-    userWallet: amount(total?.user_balance),
+    userWallet,
     redemptionBurn: amount(total?.redemption),
     pointTokenLocks,
     reconciliationDelta: '0', reconciliationMatched: true,
@@ -131,7 +212,8 @@ export async function getKap20TopUsers(tokenAddress: string, workspace: number |
   const value = await context(workspace)
   if (!value || normalizeAddress(tokenAddress) !== normalizeAddress(value.token.address)) return null
   const token = normalizeAddress(value.token.address)
-  const [received, balances] = await Promise.all([
+  const balanceColumn = walletBalanceColumnForTokenAddress(token)
+  const [received, walletSnapshotBalances] = await Promise.all([
     prisma.$queryRaw<TopRow[]>(Prisma.sql`
       WITH registered AS (
         SELECT "normalizedAddress" FROM "AddressContract"
@@ -142,6 +224,7 @@ export async function getKap20TopUsers(tokenAddress: string, workspace: number |
         SUM(d."value") AS amount
       FROM "TransactionDetail" d
       WHERE LOWER(d."tokenAddress") = ${token}
+        AND d."timestamp" >= ${value.historyStart}
         AND NOT EXISTS (
           SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(d."toHash")
         )
@@ -157,24 +240,53 @@ export async function getKap20TopUsers(tokenAddress: string, workspace: number |
         SELECT
           wallet."walletId" AS wallet_address,
           LOWER(wallet."walletId") AS normalized_address,
-          wallet."ICCYYN" AS amount,
+          wallet.${balanceColumn} AS amount,
           ROW_NUMBER() OVER (
             PARTITION BY LOWER(wallet."walletId")
             ORDER BY wallet."timestamp" DESC NULLS LAST, wallet.id DESC
           ) AS snapshot_rank
         FROM "Wallet" wallet
+      ), snapshot_balances AS (
+        SELECT snapshot.wallet_address, snapshot.normalized_address, snapshot.amount
+        FROM latest_wallet_snapshots snapshot
+        WHERE snapshot.snapshot_rank = 1
+          AND snapshot.amount > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM registered r WHERE r."normalizedAddress" = snapshot.normalized_address
+          )
+      ), transaction_balance_legs AS (
+        SELECT d."toHash" AS wallet_address, LOWER(d."toHash") AS normalized_address, d."value" AS amount
+        FROM "TransactionDetail" d
+        WHERE LOWER(d."tokenAddress") = ${token}
+          AND d."timestamp" >= ${value.historyStart}
+          AND NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(d."toHash"))
+        UNION ALL
+        SELECT d."fromHash" AS wallet_address, LOWER(d."fromHash") AS normalized_address, -d."value" AS amount
+        FROM "TransactionDetail" d
+        WHERE LOWER(d."tokenAddress") = ${token}
+          AND d."timestamp" >= ${value.historyStart}
+          AND NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(d."fromHash"))
+      ), transaction_balances AS (
+        SELECT
+          (ARRAY_AGG(wallet_address ORDER BY wallet_address))[1] AS wallet_address,
+          normalized_address,
+          SUM(amount) AS amount
+        FROM transaction_balance_legs
+        GROUP BY normalized_address
+        HAVING SUM(amount) > 0
+      ), selected_balances AS (
+        SELECT wallet_address, normalized_address, amount FROM snapshot_balances
+        UNION ALL
+        SELECT wallet_address, normalized_address, amount FROM transaction_balances
+        WHERE NOT EXISTS (SELECT 1 FROM snapshot_balances)
       )
-      SELECT snapshot.wallet_address, snapshot.amount
-      FROM latest_wallet_snapshots snapshot
-      WHERE snapshot.snapshot_rank = 1
-        AND snapshot.amount > 0
-        AND NOT EXISTS (
-          SELECT 1 FROM registered r WHERE r."normalizedAddress" = snapshot.normalized_address
-        )
-      ORDER BY snapshot.amount DESC, snapshot.normalized_address ASC
+      SELECT wallet_address, amount
+      FROM selected_balances
+      ORDER BY amount DESC, normalized_address ASC
       LIMIT 10
     `),
   ])
+  const balances = walletSnapshotBalances
   const map = (rows: TopRow[]) => rows.map((row) => ({ walletAddress: row.wallet_address, amount: amount(row.amount) }))
   return { token: value.token, topReceived: map(received), topBalances: map(balances) }
 }

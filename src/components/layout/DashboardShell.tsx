@@ -20,19 +20,16 @@ interface AdminProfile {
 const PAGE_LABELS: Record<string, string> = {
   '/dashboard': 'Overview',
   '/dashboard/analytics': 'Analytics',
-  '/dashboard/transactions': 'Transactions',
-  '/dashboard/tokens': 'Tokens',
-  '/dashboard/kap22-analysis': 'KAP-22 Analysis',
-  '/dashboard/kap20-analysis': 'KAP-20 Analysis',
+  '/dashboard/tokens': 'Tokens (KAP-20)',
+  '/dashboard/point-tokens': 'Point Tokens (KAP-22)',
+  '/dashboard/nft-redemptions': 'NFT Redemptions (KAP-721)',
   '/dashboard/roles': 'Roles',
   '/dashboard/wallets': 'Wallets',
-  '/dashboard/reports': 'Reports',
   '/dashboard/settings': 'Settings',
   '/dashboard/admin-users': 'Admin Users',
   '/dashboard/workspaces': 'Workspaces',
   '/dashboard/batch-logs': 'Batch Logs',
   '/dashboard/contracts': 'Contracts',
-  '/dashboard/redemptions': 'Redemptions',
 }
 
 export function DashboardShell({ children, admin }: { children: React.ReactNode; admin: AdminProfile }) {

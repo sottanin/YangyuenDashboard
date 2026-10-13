@@ -4,6 +4,13 @@ import { SESSION_COOKIE, verifySessionToken } from '@/lib/auth/session'
 const PUBLIC_API_PREFIXES = ['/api/auth']
 const PUBLIC_API_PATHS = ['/api/internal/batch-schedule/run']
 const PROTECTED_PATHS = ['/dashboard', '/api']
+const LEGACY_REPORT_PATHS: Record<string, string> = {
+  '/dashboard/kap20-analysis': '/dashboard/tokens',
+  '/dashboard/kap22-analysis': '/dashboard/point-tokens',
+  '/dashboard/tokens-kap20': '/dashboard/tokens',
+  '/dashboard/point-tokens-kap22': '/dashboard/point-tokens',
+  '/dashboard/redemptions': '/dashboard/nft-redemptions',
+}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -18,6 +25,13 @@ export async function middleware(request: NextRequest) {
 
   const session = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value)
   if (session) {
+    const normalizedPathname = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+    const replacementPath = LEGACY_REPORT_PATHS[normalizedPathname]
+    if (replacementPath) {
+      const redirectUrl = request.nextUrl.clone()
+      redirectUrl.pathname = replacementPath
+      return NextResponse.redirect(redirectUrl)
+    }
     const headers = new Headers(request.headers)
     headers.set('x-dashboard-pathname', pathname)
     return NextResponse.next({ request: { headers } })
