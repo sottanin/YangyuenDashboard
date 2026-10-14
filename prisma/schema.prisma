@@ -233,6 +233,7 @@ model AdminRole {
   updatedAt   DateTime             @updatedAt
   users       AdminUserRole[]
   permissions RoleMenuPermission[]
+  chartPermissions RoleChartPermission[]
 }
 
 model AdminUserRole {
@@ -262,6 +263,15 @@ model RoleMenuPermission {
 
   @@id([roleId, menuKey])
   @@index([menuKey])
+}
+
+model RoleChartPermission {
+  roleId   String
+  chartKey String
+  role     AdminRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, chartKey])
+  @@index([chartKey])
 }
 
 model ChartAnnotation {

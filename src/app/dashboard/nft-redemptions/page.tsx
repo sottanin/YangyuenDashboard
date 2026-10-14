@@ -10,6 +10,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { SkeletonKpi, SkeletonTable } from '@/components/ui/SkeletonCard'
 import { TokenAvatar } from '@/components/ui/TokenAvatar'
 import { useWorkspace } from '@/lib/WorkspaceContext'
+import { useChartPermissions } from '@/lib/ChartPermissionContext'
 
 interface SummaryResponse { nftMint: number; nftBurn: number; kap20Burn: string; kap20Fee: string; kap20Symbol: string; timezone: string }
 interface TransactionRow {
@@ -52,6 +53,17 @@ async function readResponse<T>(response: Response): Promise<T> {
 }
 
 export default function NftRedemptionsPage(): React.JSX.Element {
+  const { canViewChart } = useChartPermissions()
+  const canViewNftMint = canViewChart('nft.nft-mint')
+  const canViewNftBurn = canViewChart('nft.nft-burn')
+  const canViewKap20Burn = canViewChart('nft.kap20-burn')
+  const canViewKap20Fee = canViewChart('nft.kap20-fee')
+  const canViewKpis = canViewNftMint || canViewNftBurn || canViewKap20Burn || canViewKap20Fee
+  const canViewTopRedemptions = canViewChart('nft.top-redemptions')
+  const canViewTopBurns = canViewChart('nft.top-burns')
+  const canViewHistory = canViewChart('nft.transaction-history')
+  const canViewRankings = canViewTopRedemptions || canViewTopBurns
+  const hasVisibleContent = canViewKpis || canViewRankings || canViewHistory
   const { selected, loading: workspaceLoading } = useWorkspace()
   const workspace = String(selected.id)
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
@@ -85,14 +97,14 @@ export default function NftRedemptionsPage(): React.JSX.Element {
     setChartLoading(true); setChartError('')
     try {
       const [redemptions, burns] = await Promise.all([
-        readResponse<{ rows: NftRedemptionBarPoint[] }>(await fetch(`/api/reports/nft-redemptions/top-nfts?workspace=${encodeURIComponent(workspace)}`, { signal })),
-        readResponse<{ rows: NftRedemptionBarPoint[] }>(await fetch(`/api/reports/nft-redemptions/top-burns?workspace=${encodeURIComponent(workspace)}`, { signal })),
+        canViewTopRedemptions ? readResponse<{ rows: NftRedemptionBarPoint[] }>(await fetch(`/api/reports/nft-redemptions/top-nfts?workspace=${encodeURIComponent(workspace)}`, { signal })) : Promise.resolve({ rows: [] }),
+        canViewTopBurns ? readResponse<{ rows: NftRedemptionBarPoint[] }>(await fetch(`/api/reports/nft-redemptions/top-burns?workspace=${encodeURIComponent(workspace)}`, { signal })) : Promise.resolve({ rows: [] }),
       ])
       if (id === requestIds.current.chart) { setTopNfts(redemptions.rows); setTopBurns(burns.rows) }
     } catch (error) {
       if (!signal?.aborted && id === requestIds.current.chart) { setTopNfts([]); setTopBurns([]); setChartError(error instanceof Error ? error.message : 'Unable to load NFT rankings') }
     } finally { if (id === requestIds.current.chart) setChartLoading(false) }
-  }, [workspace])
+  }, [canViewTopBurns, canViewTopRedemptions, workspace])
 
   const loadTransactions = useCallback(async (requestedPage: number, requestedSearch: string, signal?: AbortSignal): Promise<void> => {
     const id = ++requestIds.current.table
@@ -113,10 +125,11 @@ export default function NftRedemptionsPage(): React.JSX.Element {
     queueMicrotask(() => {
       if (controller.signal.aborted) return
       setPage(1); setSearchInput(''); setSearch('')
-      void loadSummary(controller.signal); void loadChart(controller.signal)
+      if (canViewKpis) void loadSummary(controller.signal)
+      if (canViewRankings) void loadChart(controller.signal)
     })
     return () => controller.abort()
-  }, [workspaceLoading, loadSummary, loadChart])
+  }, [canViewKpis, canViewRankings, workspaceLoading, loadSummary, loadChart])
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setSearch(searchInput.trim().length >= 2 ? searchInput.trim() : ''); setPage(1) }, 375)
@@ -124,32 +137,34 @@ export default function NftRedemptionsPage(): React.JSX.Element {
   }, [searchInput])
 
   useEffect(() => {
-    if (workspaceLoading) return
+    if (workspaceLoading || !canViewHistory) return
     const controller = new AbortController()
     queueMicrotask(() => { if (!controller.signal.aborted) void loadTransactions(page, search, controller.signal) })
     return () => controller.abort()
-  }, [workspaceLoading, page, search, loadTransactions])
+  }, [canViewHistory, workspaceLoading, page, search, loadTransactions])
 
   return <div className="min-w-0 max-w-full">
     <PageHeader title="NFT Redemptions (KAP-721)" subtitle="NFT mint, burn, redemption payments and marketplace fees" />
 
-    {summaryError ? <div className="mb-4"><ErrorCard message={summaryError} onRetry={() => void loadSummary()} /></div> : summaryLoading || !summary ? <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <SkeletonKpi key={index} />)}</div> : <section className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="NFT redemption key performance indicators">
-      <KpiTile label="NFT Mint" value={`${summary.nftMint.toLocaleString()} NFTs`} icon="arrowUp" sparkColor="var(--success)" />
-      <KpiTile label="NFT Burn" value={`${summary.nftBurn.toLocaleString()} NFTs`} icon="flame" sparkColor="var(--danger)" />
-      <KpiTile label="Token (KAP-20) Burn" value={`${formatAmount(summary.kap20Burn)} ${summary.kap20Symbol}`} icon="refresh" sparkColor="var(--danger)" />
-      <KpiTile label="Token (KAP-20) Fee" value={`${formatAmount(summary.kap20Fee)} ${summary.kap20Symbol}`} icon="target" sparkColor="var(--warn)" />
+    {!hasVisibleContent ? <section role="status" className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-default px-6 py-12 text-center"><h2 className="text-base font-semibold text-default">No report content available</h2><p className="mt-2 max-w-md text-sm text-muted">Your role allows access to this menu, but no charts or content are assigned. Contact an administrator if you need access.</p></section> : null}
+
+    {canViewKpis && <div>{summaryError ? <div className="mb-4"><ErrorCard message={summaryError} onRetry={() => void loadSummary()} /></div> : summaryLoading || !summary ? <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: [canViewNftMint, canViewNftBurn, canViewKap20Burn, canViewKap20Fee].filter(Boolean).length }, (_, index) => <SkeletonKpi key={index} />)}</div> : <section className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="NFT redemption key performance indicators">
+      {canViewNftMint && <KpiTile label="NFT Mint" value={`${summary.nftMint.toLocaleString()} NFTs`} icon="arrowUp" sparkColor="var(--success)" />}
+      {canViewNftBurn && <KpiTile label="NFT Burn" value={`${summary.nftBurn.toLocaleString()} NFTs`} icon="flame" sparkColor="var(--danger)" />}
+      {canViewKap20Burn && <KpiTile label="Token (KAP-20) Burn" value={`${formatAmount(summary.kap20Burn)} ${summary.kap20Symbol}`} icon="refresh" sparkColor="var(--danger)" />}
+      {canViewKap20Fee && <KpiTile label="Token (KAP-20) Fee" value={`${formatAmount(summary.kap20Fee)} ${summary.kap20Symbol}`} icon="target" sparkColor="var(--warn)" />}
+    </section>}</div>}
+
+    {canViewRankings && <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-2" aria-label="NFT rankings">
+      {canViewTopRedemptions && <Card title="Top 10 NFT Redemptions" subtitle="จัดอันดับ NFT 10 รายการที่ถูกแลกมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
+        {chartError ? <ErrorCard message={chartError} onRetry={() => void loadChart()} /> : chartLoading ? <div className="h-[340px] shimmer rounded-xl" /> : topNfts.length === 0 ? <div className="flex h-[280px] items-center justify-center text-sm text-muted">No minted NFT redemption data found</div> : <NftRedemptionBarChart data={topNfts} />}
+      </Card>}
+      {canViewTopBurns && <Card title="Top 10 NFT Burn" subtitle="จัดอันดับ NFT 10 รายการที่ถูกใช้งานมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
+        {chartError ? <ErrorCard message={chartError} onRetry={() => void loadChart()} /> : chartLoading ? <div className="h-[340px] shimmer rounded-xl" /> : topBurns.length === 0 ? <div className="flex h-[280px] items-center justify-center text-sm text-muted">No burned NFT data found</div> : <NftRedemptionBarChart data={topBurns} variant="burn" />}
+      </Card>}
     </section>}
 
-    <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-2" aria-label="NFT rankings">
-      <Card title="Top 10 NFT Redemptions" subtitle="จัดอันดับ NFT 10 รายการที่ถูกแลกมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
-        {chartError ? <ErrorCard message={chartError} onRetry={() => void loadChart()} /> : chartLoading ? <div className="h-[340px] shimmer rounded-xl" /> : topNfts.length === 0 ? <div className="flex h-[280px] items-center justify-center text-sm text-muted">No minted NFT redemption data found</div> : <NftRedemptionBarChart data={topNfts} />}
-      </Card>
-      <Card title="Top 10 NFT Burn" subtitle="จัดอันดับ NFT 10 รายการที่ถูกใช้งานมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
-        {chartError ? <ErrorCard message={chartError} onRetry={() => void loadChart()} /> : chartLoading ? <div className="h-[340px] shimmer rounded-xl" /> : topBurns.length === 0 ? <div className="flex h-[280px] items-center justify-center text-sm text-muted">No burned NFT data found</div> : <NftRedemptionBarChart data={topBurns} variant="burn" />}
-      </Card>
-    </section>
-
-    <Card title="Transaction History" subtitle="ตารางแสดงธุรกรรม NFT ทั้งหมด พร้อม Token ID ผู้ส่ง ผู้รับ และสถานะธุรกรรม" noPad>
+    {canViewHistory && <Card title="Transaction History" subtitle="ตารางแสดงธุรกรรม NFT ทั้งหมด พร้อม Token ID ผู้ส่ง ผู้รับ และสถานะธุรกรรม" noPad>
       <div className="border-b border-default p-4 sm:p-5">
         <label htmlFor="nft-redemption-search" className="sr-only">Search NFT redemption transactions</label>
         <div className="relative max-w-xl">
@@ -177,7 +192,7 @@ export default function NftRedemptionsPage(): React.JSX.Element {
         </table></div>
         <nav aria-label="NFT redemption transaction pages" className="flex flex-col items-start justify-between gap-3 border-t border-default px-5 py-3 text-xs text-muted sm:flex-row sm:items-center"><span aria-live="polite">Page {transactions.page} of {transactions.totalPages} · {transactions.total.toLocaleString()} events</span><div className="flex gap-2"><button className="btn btn-ghost min-h-11" aria-label="Previous transaction page" disabled={page <= 1 || tableLoading} onClick={() => setPage((value) => Math.max(1, value - 1))}><Icon name="chevR" size={12} className="rotate-180" /> Previous</button><button className="btn btn-ghost min-h-11" aria-label="Next transaction page" disabled={page >= transactions.totalPages || tableLoading} onClick={() => setPage((value) => Math.min(transactions.totalPages, value + 1))}>Next <Icon name="chevR" size={12} /></button></div></nav>
       </>}
-    </Card>
+    </Card>}
   </div>
 }
 

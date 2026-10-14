@@ -53,7 +53,7 @@ export async function getCurrentAdmin() {
       lastLoginAt: true,
       createdAt: true,
       updatedAt: true,
-      roles: { select: { role: { select: { id: true, name: true, permissions: { select: { menuKey: true } } } } } },
+      roles: { select: { role: { select: { id: true, name: true, permissions: { select: { menuKey: true } }, chartPermissions: { select: { chartKey: true } } } } } },
       workspaces: { select: { workspaceId: true } },
     },
   })
@@ -70,11 +70,26 @@ export function isSuperAdmin(admin: Pick<CurrentAdmin, 'role'>): boolean {
 
 export function allowedMenuKeys(admin: CurrentAdmin): string[] {
   if (isSuperAdmin(admin)) return ['*']
-  return Array.from(new Set(admin.roles.flatMap((assignment) => assignment.role.permissions.map((permission) => permission.menuKey))))
+  const assigned = admin.roles.flatMap((assignment) => assignment.role.permissions.map((permission) => permission.menuKey))
+  const reportMenus = ['kap20-analysis', 'kap22-analysis', 'redemptions']
+  return Array.from(new Set(reportMenus.every((key) => assigned.includes(key)) ? ['overview', ...assigned] : assigned))
 }
 
 export function canAccessMenu(admin: CurrentAdmin, menuKey: string): boolean {
   return isSuperAdmin(admin) || allowedMenuKeys(admin).includes(menuKey)
+}
+
+export function allowedChartKeys(admin: CurrentAdmin): string[] {
+  if (isSuperAdmin(admin)) return ['*']
+  return Array.from(new Set(admin.roles.flatMap((assignment) => assignment.role.chartPermissions.map((permission) => permission.chartKey))))
+}
+
+export function canAccessChart(admin: CurrentAdmin, chartKey: string): boolean {
+  return isSuperAdmin(admin) || allowedChartKeys(admin).includes(chartKey)
+}
+
+export function canAccessAnyChart(admin: CurrentAdmin, chartKeys: readonly string[]): boolean {
+  return isSuperAdmin(admin) || chartKeys.some((chartKey) => canAccessChart(admin, chartKey))
 }
 
 export function allowedWorkspaceIds(admin: CurrentAdmin): number[] | null {

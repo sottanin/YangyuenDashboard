@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
+import { canAccessAnyChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
 import { prisma } from '@/lib/prisma'
 import { isSelectableReportWorkspace, parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
 import { normalizeAddress } from '@/lib/system/addresses'
@@ -9,7 +9,7 @@ import { detectTokenImageType, readTokenImage } from '@/lib/system/tokenImages'
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = await getCurrentAdmin()
   if (!admin) return new NextResponse(null, { status: 401 })
-  if (!canAccessMenu(admin, 'redemptions')) return new NextResponse(null, { status: 403 })
+  if (!canAccessMenu(admin, 'redemptions') || !canAccessAnyChart(admin, ['nft.top-redemptions', 'nft.top-burns', 'nft.transaction-history'])) return new NextResponse(null, { status: 403 })
   const workspace = parseWorkspaceSelection(request.nextUrl.searchParams.get('workspace'))
   if (workspace === null || !await isSelectableReportWorkspace(workspace)) return new NextResponse(null, { status: 400 })
   if (!canAccessWorkspace(admin, workspace)) return new NextResponse(null, { status: 403 })

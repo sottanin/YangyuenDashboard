@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
+import { canAccessChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
 import { getNftRedemptionTransactions } from '@/lib/reporting/nftRedemptionsAnalysis'
 import { isSelectableReportWorkspace, parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = await getCurrentAdmin()
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canAccessMenu(admin, 'redemptions')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!canAccessMenu(admin, 'redemptions') || !canAccessChart(admin, 'nft.transaction-history')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const params = request.nextUrl.searchParams
   const workspace = parseWorkspaceSelection(params.get('workspace'))
   if (workspace === null) return NextResponse.json({ error: 'Invalid workspace' }, { status: 400 })

@@ -11,6 +11,7 @@ interface HeatmapProps {
 
 export function Heatmap({ data, rowLabels, colLabels, height = 220 }: HeatmapProps) {
   const [hover, setHover] = useState<{ ri: number; ci: number; v: number } | null>(null)
+  const maxValue = Math.max(1, ...data.flat())
 
   return (
     <div className="relative w-full" style={{ height }}>
@@ -25,7 +26,7 @@ export function Heatmap({ data, rowLabels, colLabels, height = 220 }: HeatmapPro
                 {row.map((v, ci) => (
                   <div key={ci}
                     className="heatmap-cell"
-                    style={{ background: `rgb(var(--accent) / ${0.08 + (v / 100) * 0.92})` }}
+                    style={{ background: `rgb(var(--accent) / ${0.08 + (v / maxValue) * 0.92})` }}
                     onMouseEnter={() => setHover({ ri, ci, v })}
                     onMouseLeave={() => setHover(null)}
                   />
@@ -40,7 +41,7 @@ export function Heatmap({ data, rowLabels, colLabels, height = 220 }: HeatmapPro
       </div>
       {hover && (
         <div className="absolute top-2 right-2 chart-tooltip" style={{ position: 'absolute', transform: 'none' }}>
-          {rowLabels[hover.ri]} · {colLabels[hover.ci]} → <span className="font-mono">{hover.v}</span>
+          {rowLabels[hover.ri]} · {colLabels[hover.ci]} → <span className="font-mono">{hover.v.toLocaleString()} transactions</span>
         </div>
       )}
     </div>

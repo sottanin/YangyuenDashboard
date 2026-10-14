@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getKap22Transactions } from '@/lib/reporting/kap22Analysis'
 import { normalizeAddress, isValidAddress } from '@/lib/system/addresses'
 import { parseWorkspaceSelection, WorkspaceNotFoundError } from '@/lib/reporting/workspaceScope'
-import { canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
+import { canAccessChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
 
 function boundedInteger(value: string | null, fallback: number, maximum: number): number | null {
   if (value === null) return fallback
@@ -14,7 +14,7 @@ function boundedInteger(value: string | null, fallback: number, maximum: number)
 export async function GET(request: NextRequest) {
   const admin = await getCurrentAdmin()
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canAccessMenu(admin, 'kap22-analysis')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!canAccessMenu(admin, 'kap22-analysis') || !canAccessChart(admin, 'kap22.transaction-history')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const token = request.nextUrl.searchParams.get('token')?.trim() ?? ''
   const workspace = parseWorkspaceSelection(request.nextUrl.searchParams.get('workspace'))
   // Bound offset pagination so an authenticated request cannot force PostgreSQL

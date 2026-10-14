@@ -20,6 +20,7 @@ interface BarChartProps {
   color?: string
   stacked?: boolean
   keys?: BarKey[]
+  tooltipValueFormat?: 'compact' | 'integer'
 }
 
 export function BarChart({
@@ -30,6 +31,7 @@ export function BarChart({
   color = 'var(--accent)',
   stacked = false,
   keys,
+  tooltipValueFormat = 'compact',
 }: BarChartProps) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const gradientId = useId()
@@ -167,7 +169,9 @@ export function BarChart({
             <div key={k.key} className="flex items-center gap-2">
               <span className="inline-block w-2 h-2 rounded-full" style={{ background: k._color }} />
               <span className="text-muted capitalize">{k.label || k.key}:</span>
-              <span className="font-mono">{fmt(Number(data[hover!.i][k.key]) || 0)}</span>
+              <span className="font-mono">{tooltipValueFormat === 'integer'
+                ? (Number(data[hover!.i][k.key]) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
+                : fmt(Number(data[hover!.i][k.key]) || 0)}</span>
             </div>
           ))}
         </div>

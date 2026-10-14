@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
+import { canAccessAnyChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
 import { isValidAddress } from '@/lib/system/addresses'
 import { parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
 import { KAP20_REPORT_KEY, resolveAnnotationScope, validateAnnotationInput } from '@/lib/reporting/kap22Annotations'
@@ -12,7 +12,7 @@ function serialize(annotation: { id: string; date: Date; event: string; createdA
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = await getCurrentAdmin()
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canAccessMenu(admin, 'kap20-analysis')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!canAccessMenu(admin, 'kap20-analysis') || !canAccessAnyChart(admin, ['kap20.daily-transaction-count', 'kap20.daily-transfer-volume'])) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const token = request.nextUrl.searchParams.get('token') ?? ''
   const workspace = parseWorkspaceSelection(request.nextUrl.searchParams.get('workspace'))
   if (!isValidAddress(token) || workspace === null) return NextResponse.json({ error: 'Invalid annotation scope' }, { status: 400 })
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const admin = await getCurrentAdmin()
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canAccessMenu(admin, 'kap20-analysis')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!canAccessMenu(admin, 'kap20-analysis') || !canAccessAnyChart(admin, ['kap20.daily-transaction-count', 'kap20.daily-transfer-volume'])) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
     const body: unknown = await request.json()
     if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: 'Invalid annotation' }, { status: 400 })

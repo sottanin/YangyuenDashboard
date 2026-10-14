@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
+import { canAccessAnyChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
 import { isValidAddress } from '@/lib/system/addresses'
 import { parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
 import { KAP22_REPORT_KEY, resolveAnnotationScope, validateAnnotationInput } from '@/lib/reporting/kap22Annotations'
@@ -10,7 +10,7 @@ interface RouteContext { params: Promise<{ id: string }> }
 export async function PUT(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const admin = await getCurrentAdmin()
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canAccessMenu(admin, 'kap22-analysis')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!canAccessMenu(admin, 'kap22-analysis') || !canAccessAnyChart(admin, ['kap22.daily-transaction-count', 'kap22.daily-transfer-volume'])) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
   try {
     const body: unknown = await request.json()
@@ -36,7 +36,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext): Promi
 export async function DELETE(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const admin = await getCurrentAdmin()
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canAccessMenu(admin, 'kap22-analysis')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!canAccessMenu(admin, 'kap22-analysis') || !canAccessAnyChart(admin, ['kap22.daily-transaction-count', 'kap22.daily-transfer-volume'])) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const { id } = await params
   const token = request.nextUrl.searchParams.get('token') ?? ''
   const workspace = parseWorkspaceSelection(request.nextUrl.searchParams.get('workspace'))

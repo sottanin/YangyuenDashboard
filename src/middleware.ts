@@ -10,6 +10,7 @@ const LEGACY_REPORT_PATHS: Record<string, string> = {
   '/dashboard/tokens-kap20': '/dashboard/tokens',
   '/dashboard/point-tokens-kap22': '/dashboard/point-tokens',
   '/dashboard/redemptions': '/dashboard/nft-redemptions',
+  '/dashboard/analytics': '/dashboard',
 }
 
 export async function middleware(request: NextRequest) {

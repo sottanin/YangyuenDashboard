@@ -1,12 +1,9 @@
 'use client'
 
 import { FormEvent, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
 import { Icon } from '@/components/ui/Icon'
 
 export function LoginForm() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -30,8 +27,7 @@ export function LoginForm() {
         return
       }
 
-      router.replace(searchParams.get('next') || '/dashboard')
-      router.refresh()
+      window.location.replace('/dashboard')
     } catch {
       setError('Network error')
     } finally {

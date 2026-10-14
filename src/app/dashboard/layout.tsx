@@ -1,6 +1,6 @@
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { DashboardShell } from '@/components/layout/DashboardShell'
-import { allowedMenuKeys, isSuperAdmin, requireAdmin } from '@/lib/auth/admin'
+import { allowedChartKeys, allowedMenuKeys, isSuperAdmin, requireAdmin } from '@/lib/auth/admin'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { MENU_CATALOG, menuKeyForPath } from '@/lib/auth/menuCatalog'
@@ -16,7 +16,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <ThemeProvider>
-      <DashboardShell admin={{ ...admin, menuKeys, allWorkspaces: isSuperAdmin(admin) }}>{children}</DashboardShell>
+      <DashboardShell admin={{ ...admin, menuKeys, chartKeys: allowedChartKeys(admin), allWorkspaces: isSuperAdmin(admin) }}>{children}</DashboardShell>
     </ThemeProvider>
   )
 }

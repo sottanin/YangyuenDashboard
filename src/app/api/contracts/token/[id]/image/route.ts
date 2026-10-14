@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { canAccessAnyChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
+import { chartKeysForMenu } from '@/lib/auth/chartCatalog'
 import { authorizeSystemMutation } from '@/lib/system/authorization'
 import { detectTokenImageType, MAX_TOKEN_IMAGE_BYTES, readTokenImage, removeTokenImage, storeTokenImage } from '@/lib/system/tokenImages'
 
@@ -36,9 +38,15 @@ function denied(authorization: 'unauthorized' | 'forbidden'): NextResponse {
 }
 
 export async function GET(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const admin = await getCurrentAdmin()
+  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { id } = await params
-  const token = await prisma.tokenContract.findUnique({ where: { id }, select: { imageKey: true } })
+  const token = await prisma.tokenContract.findUnique({ where: { id }, select: { imageKey: true, workspaceId: true, standard: true } })
   if (!token?.imageKey) return new NextResponse(null, { status: 404 })
+  if (!canAccessWorkspace(admin, token.workspaceId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const standard = token.standard?.toUpperCase()
+  const menuKey = standard === 'KAP-20' ? 'kap20-analysis' : standard === 'KAP-22' ? 'kap22-analysis' : standard === 'KAP-721' ? 'redemptions' : null
+  if (!menuKey || !canAccessMenu(admin, menuKey) || !canAccessAnyChart(admin, chartKeysForMenu(menuKey))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
     const body = await readTokenImage(token.imageKey)
     const mimeType = detectTokenImageType(body)

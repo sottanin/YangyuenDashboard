@@ -10,8 +10,10 @@ import { SkeletonKpi, SkeletonTable } from '@/components/ui/SkeletonCard'
 import { SingleLineChart, type SingleLinePoint } from '@/components/charts/SingleLineChart'
 import { HorizontalBarChart, type HorizontalBarPoint } from '@/components/charts/HorizontalBarChart'
 import { PointTokenLockDonuts, type PointTokenLock } from '@/components/charts/PointTokenLockDonuts'
+import { Heatmap } from '@/components/charts/Heatmap'
 import { useWorkspace } from '@/lib/WorkspaceContext'
 import { TokenAvatar } from '@/components/ui/TokenAvatar'
+import { useChartPermissions } from '@/lib/ChartPermissionContext'
 
 interface TokenOption { id: string; name: string; symbol: string; address: string; imageUrl: string | null }
 interface ChartAnnotation { id: string; date: string; event: string; createdAt: string; updatedAt: string }
@@ -77,6 +79,27 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
   const reportLabel = isKap20 ? 'KAP-20' : 'KAP-22'
   const reportTitle = isKap20 ? 'Tokens (KAP-20)' : 'Point Tokens (KAP-22)'
   const apiBase = `/api/reports/${reportType}`
+  const { canViewChart } = useChartPermissions()
+  const chartKey = (suffix: string): string => `${reportType}.${suffix}`
+  const canViewMint = canViewChart(chartKey('mint'))
+  const canViewBackupWallet = isKap20 && canViewChart('kap20.backup-wallet')
+  const canViewWorkspaceWallet = isKap20 && canViewChart('kap20.workspace-wallet')
+  const canViewDistributorPool = canViewChart(chartKey('distributor-pool'))
+  const canViewOperationPool = !isKap20 && canViewChart('kap22.operation-pool')
+  const canViewUserWallet = canViewChart(chartKey('user-wallet'))
+  const canViewBurn = canViewChart(isKap20 ? 'kap20.redemption-burn' : 'kap22.burn-wallet')
+  const canViewKpis = canViewMint || canViewBackupWallet || canViewWorkspaceWallet || canViewDistributorPool || canViewOperationPool || canViewUserWallet || canViewBurn
+  const canViewDailyCount = canViewChart(chartKey('daily-transaction-count'))
+  const canViewDailyVolume = canViewChart(chartKey('daily-transfer-volume'))
+  const canViewHeatmap = canViewChart(chartKey('activity-heatmap'))
+  const canViewConversion = isKap20 && canViewChart('kap20.conversion-balance')
+  const canViewTopRecipients = canViewChart(chartKey('top-recipients'))
+  const canViewTopHolders = canViewChart(chartKey('top-holders'))
+  const canViewHistory = canViewChart(chartKey('transaction-history'))
+  const canViewDailyCharts = canViewDailyCount || canViewDailyVolume
+  const canViewSummary = canViewKpis || canViewDailyCharts || canViewHeatmap || canViewConversion
+  const canViewTopUsers = canViewTopRecipients || canViewTopHolders
+  const hasVisibleContent = canViewSummary || canViewHeatmap || canViewTopUsers || canViewHistory
   const { selected, loading: workspaceLoading } = useWorkspace()
   const [tokens, setTokens] = useState<TokenOption[]>([])
   const [selectedToken, setSelectedToken] = useState('')
@@ -94,6 +117,9 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
   const [summaryError, setSummaryError] = useState('')
   const [tableError, setTableError] = useState('')
   const [topUsersError, setTopUsersError] = useState('')
+  const [heatmap, setHeatmap] = useState<number[][]>([])
+  const [heatmapLoading, setHeatmapLoading] = useState(false)
+  const [heatmapError, setHeatmapError] = useState('')
   const [period, setPeriod] = useState<Period>('all')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
@@ -108,6 +134,7 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
   const summaryRequest = useRef(0)
   const tableRequest = useRef(0)
   const topUsersRequest = useRef(0)
+  const heatmapRequest = useRef(0)
   const annotationRequest = useRef(0)
   const workspace = String(selected.id)
   const annotationSelection = useRef({ token: '', workspace: '' })
@@ -133,7 +160,7 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
     } finally {
       if (requestId === tokenRequest.current) setTokensLoading(false)
     }
-  }, [apiBase, isKap20, workspace])
+  }, [apiBase, isKap20, workspace, setPage, setSelectedToken])
 
   const loadSummary = useCallback(async (token: string, signal?: AbortSignal): Promise<void> => {
     const requestId = ++summaryRequest.current
@@ -189,23 +216,44 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
     }
   }, [apiBase, workspace])
 
+  const loadHeatmap = useCallback(async (token: string, from: string | null, to: string | null, signal?: AbortSignal): Promise<void> => {
+    const requestId = ++heatmapRequest.current
+    setHeatmapLoading(true)
+    setHeatmapError('')
+    try {
+      const query = new URLSearchParams({ token, workspace })
+      if (from) query.set('from', from)
+      if (to) query.set('to', to)
+      const response = await fetch(`/api/charts/heatmap?${query}`, { signal })
+      const data = await responseJson<{ heatmap: number[][] }>(response)
+      if (requestId === heatmapRequest.current) setHeatmap(data.heatmap)
+    } catch (error) {
+      if (!signal?.aborted && requestId === heatmapRequest.current) {
+        setHeatmap([])
+        setHeatmapError(error instanceof Error ? error.message : 'Unable to load activity heatmap')
+      }
+    } finally {
+      if (requestId === heatmapRequest.current) setHeatmapLoading(false)
+    }
+  }, [workspace])
+
   useEffect(() => {
-    if (workspaceLoading) return
+    if (workspaceLoading || !hasVisibleContent) return
     const controller = new AbortController()
     queueMicrotask(() => { if (!controller.signal.aborted) void loadTokens(controller.signal) })
     return () => controller.abort()
-  }, [loadTokens, workspaceLoading])
+  }, [hasVisibleContent, loadTokens, workspaceLoading])
 
   useEffect(() => {
     if (!selectedToken) return
     const controller = new AbortController()
     queueMicrotask(() => {
       if (controller.signal.aborted) return
-      void loadSummary(selectedToken, controller.signal)
-      void loadTopUsers(selectedToken, controller.signal)
+      if (canViewSummary) void loadSummary(selectedToken, controller.signal)
+      if (canViewTopUsers) void loadTopUsers(selectedToken, controller.signal)
     })
     return () => controller.abort()
-  }, [selectedToken, loadSummary, loadTopUsers])
+  }, [canViewSummary, canViewTopUsers, selectedToken, loadSummary, loadTopUsers])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -217,11 +265,11 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
   }, [searchInput])
 
   useEffect(() => {
-    if (!selectedToken) return
+    if (!selectedToken || !canViewHistory) return
     const controller = new AbortController()
     queueMicrotask(() => { if (!controller.signal.aborted) void loadTransactions(selectedToken, page, search, controller.signal) })
     return () => controller.abort()
-  }, [page, search, selectedToken, loadTransactions])
+  }, [canViewHistory, page, search, selectedToken, loadTransactions])
 
   const loadAnnotations = useCallback(async (token: string, signal?: AbortSignal): Promise<void> => {
     const requestId = ++annotationRequest.current
@@ -234,7 +282,7 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
         setAnnotationError(error instanceof Error ? error.message : 'Unable to load annotations')
       }
     }
-  }, [apiBase, workspace])
+  }, [apiBase, workspace, setAnnotationError, setAnnotations])
 
   useEffect(() => {
     annotationSelection.current = { token: selectedToken, workspace }
@@ -246,10 +294,10 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
       setAnnotations([])
       setAnnotationError('')
       setAnnotationSaving(false)
-      if (selectedToken) void loadAnnotations(selectedToken, controller.signal)
+      if (selectedToken && canViewDailyCharts) void loadAnnotations(selectedToken, controller.signal)
     })
     return () => controller.abort()
-  }, [selectedToken, loadAnnotations, workspace])
+  }, [canViewDailyCharts, selectedToken, loadAnnotations, workspace])
 
   function periodStart(end: string): string | null {
     if (period === 'all') return null
@@ -268,6 +316,16 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
     const start = periodStart(end)
     return (!start || point.date >= start) && point.date <= end
   })
+  const heatmapFrom = customRangeInvalid ? null : periodStart(endDate ?? '')
+  const heatmapTo = customRangeInvalid ? null : (endDate ?? null)
+  useEffect(() => {
+    if (!canViewHeatmap || !selectedToken || !summary || customRangeInvalid) return
+    const controller = new AbortController()
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) void loadHeatmap(selectedToken, heatmapFrom, heatmapTo, controller.signal)
+    })
+    return () => controller.abort()
+  }, [canViewHeatmap, customRangeInvalid, heatmapFrom, heatmapTo, loadHeatmap, selectedToken, summary])
   const annotationMap = new Map<string, string[]>()
   for (const annotation of annotations) annotationMap.set(annotation.date, [...(annotationMap.get(annotation.date) ?? []), annotation.event])
 
@@ -339,60 +397,64 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
     <PageHeader
       title={reportTitle}
       subtitle="Pool balances, mint and burn activity from the configured business history"
-      actions={<div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-end sm:justify-end">
+      actions={hasVisibleContent ? <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-end sm:justify-end">
         <TokenSelector tokens={tokens} value={selectedToken} disabled={tokensLoading || tokens.length === 0} onChange={(value) => { setPage(1); setSearchInput(''); setSearch(''); setSelectedToken(value) }} />
-        <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-muted sm:w-36" htmlFor="kap22-period">Period
+        {(canViewDailyCharts || canViewHeatmap) && <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-muted sm:w-36" htmlFor="kap22-period">Period
           <select id="kap22-period" className="input min-h-11" value={period} onChange={(event) => setPeriod(event.target.value as Period)}>
             <option value="all">All-time</option><option value="week">1 Week</option><option value="month">1 Month</option><option value="3months">3 Months</option><option value="year">1 Year</option><option value="custom">Select dates</option>
           </select>
-        </label>
-        {period === 'custom' && <div className="flex min-w-0 items-end gap-2 sm:w-auto"><label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-muted" htmlFor="kap22-from">From<input id="kap22-from" type="date" className="input min-h-11 min-w-0" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /></label><label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-muted" htmlFor="kap22-to">To<input id="kap22-to" type="date" className="input min-h-11 min-w-0" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></label></div>}
-        <button type="button" className="btn btn-primary min-h-11 self-end px-4" onClick={() => openAnnotation()}>+ Add event</button>
-      </div>}
+        </label>}
+        {(canViewDailyCharts || canViewHeatmap) && period === 'custom' && <div className="flex min-w-0 items-end gap-2 sm:w-auto"><label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-muted" htmlFor="kap22-from">From<input id="kap22-from" type="date" className="input min-h-11 min-w-0" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /></label><label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-muted" htmlFor="kap22-to">To<input id="kap22-to" type="date" className="input min-h-11 min-w-0" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></label></div>}
+        {canViewDailyCharts && <button type="button" className="btn btn-primary min-h-11 self-end px-4" onClick={() => openAnnotation()}>+ Add event</button>}
+      </div> : undefined}
     />
 
-    {tokensError ? <ErrorCard message={tokensError} onRetry={() => void loadTokens()} /> : tokens.length === 0 && !tokensLoading ? (
+    {!hasVisibleContent ? <section role="status" className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-default px-6 py-12 text-center"><h2 className="text-base font-semibold text-default">No report content available</h2><p className="mt-2 max-w-md text-sm text-muted">Your role allows access to this menu, but no charts or content are assigned. Contact an administrator if you need access.</p></section> : tokensError ? <ErrorCard message={tokensError} onRetry={() => void loadTokens()} /> : tokens.length === 0 && !tokensLoading ? (
       <Card><div className="py-12 text-center"><div className="text-sm font-medium text-default">No active {reportLabel} tokens</div><p className="mt-1 text-xs text-muted">Add an active token contract in the registry.</p></div></Card>
     ) : <>
-      {summaryError ? <div className="mb-4"><ErrorCard message={summaryError} onRetry={() => selectedToken && void loadSummary(selectedToken)} /></div> : summaryLoading || !summary ? (
+      {canViewKpis && <div>{summaryError ? <div className="mb-4"><ErrorCard message={summaryError} onRetry={() => selectedToken && void loadSummary(selectedToken)} /></div> : summaryLoading || !summary ? (
         <section aria-label={`${reportLabel} key performance indicators`} aria-live="polite" className={`mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 ${isKap20 ? 'xl:grid-cols-3' : 'xl:grid-cols-5'}`}>{Array.from({ length: isKap20 ? 6 : 5 }, (_, key) => <SkeletonKpi key={key} />)}</section>
       ) : <section aria-label={`${reportLabel} key performance indicators`} aria-live="polite" className={`mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 ${isKap20 ? 'xl:grid-cols-3' : 'xl:grid-cols-5'}`}>
-        <KpiTile label="Mint" value={`${formatAmount(summary.mint)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="arrowUp" sparkColor="var(--success)" />
-        {isKap20 ? <KpiTile label="Backup Wallet" value={`${formatAmount(summary.backupWallet ?? '0')} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="target" sparkColor="var(--accent-3)" /> : null}
-        {isKap20 ? <KpiTile label="Workspace Wallet" value={`${formatAmount(summary.workspaceWallet ?? '0')} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="lock" sparkColor="var(--accent-2)" /> : null}
-        <KpiTile label="DistributorPool" value={`${formatAmount(summary.distributorPool)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="box" />
-        {!isKap20 ? <KpiTile label="OperationPool" value={`${formatAmount(summary.operationPool)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="target" sparkColor="var(--accent-3)" /> : null}
-        <KpiTile label="User Wallet" value={`${formatAmount(isKap20 ? summary.userWallet ?? '0' : summary.transferToUsers)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="users" sparkColor="var(--accent-2)" />
-        <KpiTile label={isKap20 ? 'Redemption (Burn)' : 'Burn Wallet'} value={`${formatAmount(isKap20 ? summary.redemptionBurn ?? '0' : summary.burn)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="refresh" sparkColor="var(--danger)" />
-      </section>}
+        {canViewMint && <KpiTile label="Mint" value={`${formatAmount(summary.mint)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="arrowUp" sparkColor="var(--success)" />}
+        {canViewBackupWallet && <KpiTile label="Backup Wallet" value={`${formatAmount(summary.backupWallet ?? '0')} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="target" sparkColor="var(--accent-3)" />}
+        {canViewWorkspaceWallet && <KpiTile label="Workspace Wallet" value={`${formatAmount(summary.workspaceWallet ?? '0')} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="lock" sparkColor="var(--accent-2)" />}
+        {canViewDistributorPool && <KpiTile label="DistributorPool" value={`${formatAmount(summary.distributorPool)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="box" />}
+        {canViewOperationPool && <KpiTile label="OperationPool" value={`${formatAmount(summary.operationPool)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="target" sparkColor="var(--accent-3)" />}
+        {canViewUserWallet && <KpiTile label="User Wallet" value={`${formatAmount(isKap20 ? summary.userWallet ?? '0' : summary.transferToUsers)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="users" sparkColor="var(--accent-2)" />}
+        {canViewBurn && <KpiTile label={isKap20 ? 'Redemption (Burn)' : 'Burn Wallet'} value={`${formatAmount(isKap20 ? summary.redemptionBurn ?? '0' : summary.burn)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="refresh" sparkColor="var(--danger)" />}
+      </section>}</div>}
 
-      {summary && !summary.reconciliationMatched ? <div className="mb-4" role="status">
+      {canViewKpis && summary && !summary.reconciliationMatched ? <div className="mb-4" role="status">
         <ErrorCard message={`KAP-22 reconciliation mismatch: ${formatAmount(summary.reconciliationDelta)} ${summary.token.symbol}`} />
       </div> : null}
 
       <div className="mb-4 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card className="min-w-0 max-w-full" title="Daily Transaction Count" subtitle="แสดงจำนวนรายการธุรกรรมทั้งหมดที่ผู้ใช้งานทำในแต่ละวัน (หน่วย: Transactions)">
+        {canViewDailyCount && <div><Card className="min-w-0 max-w-full" title="Daily Transaction Count" subtitle="แสดงจำนวนรายการธุรกรรมทั้งหมดที่ผู้ใช้งานทำในแต่ละวัน (หน่วย: Transactions)">
           {customRangeInvalid ? <div className="flex h-[300px] items-center justify-center text-sm text-red-400">Select a valid From and To date.</div> : summaryLoading ? <div className="h-[300px] shimmer rounded-xl" /> : transactionChartData.length === 0 ? <div className="flex h-[300px] items-center justify-center text-sm text-muted">No transfer history found</div> : <SingleLineChart data={transactionChartData} label="Total transactions" tooltipUnit="transactions" averageUnit="transactions" valueKind="count" color="var(--success)" />}
-        </Card>
-        <Card className="min-w-0 max-w-full" title="Daily Token Transfer Volume" subtitle="แสดงจำนวนโทเคนทั้งหมดที่ผู้ใช้งานโอนในแต่ละวัน (หน่วย: Tokens)">
+        </Card></div>}
+        {canViewDailyVolume && <div><Card className="min-w-0 max-w-full" title="Daily Token Transfer Volume" subtitle="แสดงจำนวนโทเคนทั้งหมดที่ผู้ใช้งานโอนในแต่ละวัน (หน่วย: Tokens)">
           {customRangeInvalid ? <div className="flex h-[300px] items-center justify-center text-sm text-red-400">Select a valid From and To date.</div> : summaryLoading ? <div className="h-[300px] shimmer rounded-xl" /> : amountChartData.length === 0 ? <div className="flex h-[300px] items-center justify-center text-sm text-muted">No transfer history found</div> : <SingleLineChart data={amountChartData} label={`Total amount (${summary?.token.symbol ?? 'KAP-22'})`} tooltipUnit={`amounts (${summary?.token.symbol ?? 'KAP-22'})`} averageUnit={summary?.token.symbol ?? 'KAP-22'} valueKind="amount" color="var(--danger)" />}
-        </Card>
+        </Card></div>}
       </div>
 
-      {isKap20 && summary ? <Card className="mb-4 min-w-0 max-w-full" title="KAP-20 Available Balance for Token Conversion" subtitle="จำนวนโทเคน KAP-20 คงเหลือที่ระบบมีไว้รองรับการแลกเปลี่ยนจาก KAP-22 เป็น KAP-20 ของผู้ใช้งาน">
+      {canViewHeatmap && <div><Card className="mb-4 min-w-0 max-w-full" title="Activity Heatmap" subtitle="แสดงจำนวนธุรกรรมที่เกิดขึ้นในแต่ละชั่วโมงของแต่ละวันในสัปดาห์">
+        {heatmapLoading ? <div className="h-[220px] shimmer rounded-xl" /> : heatmapError ? <ErrorCard message={heatmapError} /> : heatmap.length === 0 || !heatmap.some((row) => row.some((value) => value > 0)) ? <div className="flex h-[220px] items-center justify-center text-sm text-muted">No transaction activity found</div> : <Heatmap data={heatmap} rowLabels={['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']} colLabels={Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, '0')}:00`)} />}
+      </Card></div>}
+
+      {isKap20 && summary && canViewConversion ? <Card className="mb-4 min-w-0 max-w-full" title="KAP-20 Available Balance for Token Conversion" subtitle="จำนวนโทเคน KAP-20 คงเหลือที่ระบบมีไว้รองรับการแลกเปลี่ยนจาก KAP-22 เป็น KAP-20 ของผู้ใช้งาน">
         <PointTokenLockDonuts data={summary.pointTokenLocks ?? []} balanceSymbol={summary.token.symbol} />
       </Card> : null}
 
       <div className="mb-4 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card className="min-w-0 max-w-full" title="Top 10 Token Recipients" subtitle="จัดอันดับผู้ใช้งาน 10 คนที่ได้รับโทเคนสะสมมากที่สุด (Total Tokens Received)">
+        {canViewTopRecipients && <Card className="min-w-0 max-w-full" title="Top 10 Token Recipients" subtitle="จัดอันดับผู้ใช้งาน 10 คนที่ได้รับโทเคนสะสมมากที่สุด (Total Tokens Received)">
           {topUsersError ? <ErrorCard message={topUsersError} onRetry={() => selectedToken && void loadTopUsers(selectedToken)} /> : topUsersLoading || !topUsers ? <div className="h-[336px] shimmer rounded-xl" /> : topUsers.topReceived.length === 0 ? <div className="flex h-[336px] items-center justify-center text-center text-sm text-muted">No user transfers found</div> : <HorizontalBarChart data={topUsers.topReceived} symbol={topUsers.token.symbol} color="var(--accent)" ariaLabel={`Top 10 users by total ${topUsers.token.symbol} received`} />}
-        </Card>
-        <Card className="min-w-0 max-w-full" title="Top 10 Token Holders by Balance" subtitle="จัดอันดับผู้ใช้งาน 10 คนที่มีจำนวนโทเคนคงเหลือใน Wallet สูงที่สุด (Current Token Balance)">
+        </Card>}
+        {canViewTopHolders && <Card className="min-w-0 max-w-full" title="Top 10 Token Holders by Balance" subtitle="จัดอันดับผู้ใช้งาน 10 คนที่มีจำนวนโทเคนคงเหลือใน Wallet สูงที่สุด (Current Token Balance)">
           {topUsersError ? <ErrorCard message={topUsersError} onRetry={() => selectedToken && void loadTopUsers(selectedToken)} /> : topUsersLoading || !topUsers ? <div className="h-[336px] shimmer rounded-xl" /> : topUsers.topBalances.length === 0 ? <div className="flex h-[336px] items-center justify-center text-center text-sm text-muted">No positive synchronized on-chain balances found</div> : <HorizontalBarChart data={topUsers.topBalances} symbol={topUsers.token.symbol} color="var(--success)" ariaLabel={`Top 10 users by latest synchronized on-chain ${topUsers.token.symbol} balance`} rankMarker="wealth" />}
-        </Card>
+        </Card>}
       </div>
 
-      <Card className="min-w-0 max-w-full" title="Transaction History" subtitle="ตารางแสดงรายละเอียดธุรกรรมทั้งหมด เช่น วันที่ทำรายการ, Transaction ID, ผู้ส่ง, ผู้รับ, จำนวนโทเคน และสถานะธุรกรรม" noPad>
+      {canViewHistory && <Card className="min-w-0 max-w-full" title="Transaction History" subtitle="ตารางแสดงรายละเอียดธุรกรรมทั้งหมด เช่น วันที่ทำรายการ, Transaction ID, ผู้ส่ง, ผู้รับ, จำนวนโทเคน และสถานะธุรกรรม" noPad>
         <div className="border-b border-default p-4 sm:p-5">
           <label htmlFor="kap22-transaction-search" className="sr-only">Search {reportLabel} transactions</label>
           <div className="relative max-w-xl">
@@ -425,7 +487,7 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
             <div className="flex items-center gap-2"><button className="btn btn-ghost" aria-label="Previous transaction page" disabled={page <= 1 || tableLoading} onClick={() => setPage((value) => Math.max(1, value - 1))}><Icon name="chevR" size={12} className="rotate-180" /> Previous</button><button className="btn btn-ghost" aria-label="Next transaction page" disabled={page >= transactions.totalPages || tableLoading} onClick={() => setPage((value) => Math.min(transactions.totalPages, value + 1))}>Next <Icon name="chevR" size={12} /></button></div>
           </div>
         </>}
-      </Card>
+      </Card>}
     </>}
     {annotationModal && <AnnotationModal annotations={annotations} editing={editingAnnotation} date={annotationDate} event={annotationEvent} error={annotationError} saving={annotationSaving} minDate={summary?.daily[0]?.date ?? ''} maxDate={summary?.daily.at(-1)?.date ?? ''} setDate={setAnnotationDate} setEvent={setAnnotationEvent} edit={(annotation) => { setEditingAnnotation(annotation); setAnnotationDate(annotation.date); setAnnotationEvent(annotation.event); setAnnotationError('') }} save={() => void saveAnnotation()} remove={(annotation) => void deleteAnnotation(annotation)} close={() => setAnnotationModal(false)} />}
   </div>

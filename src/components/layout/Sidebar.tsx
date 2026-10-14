@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
+import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { Icon } from '@/components/ui/Icon'
 import { MENU_CATALOG } from '@/lib/auth/menuCatalog'
 
@@ -21,8 +23,9 @@ interface SidebarProps {
 
 export function Sidebar({ state, admin }: SidebarProps) {
   const pathname = usePathname()
+  const router = useRouter()
+  const [profileOpen, setProfileOpen] = useState(false)
   const isNarrow = state === 'narrow'
-  if (state === 'closed') return null
 
   const isActive = (href: string) => {
     if (href === '/dashboard') return pathname === '/dashboard'
@@ -31,6 +34,21 @@ export function Sidebar({ state, admin }: SidebarProps) {
 
   const visibleMenus = MENU_CATALOG.filter((menu) => admin.menuKeys.includes('*') || admin.menuKeys.includes(menu.key))
   const sections = ['Workspace', 'Blockchain', 'System'].map((section) => ({ section, items: visibleMenus.filter((menu) => menu.section === section) })).filter((section) => section.items.length > 0)
+
+  useEffect(() => {
+    if (!profileOpen) return
+    const close = (): void => setProfileOpen(false)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [profileOpen])
+
+  async function signOut(): Promise<void> {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    router.replace('/admin/login')
+    router.refresh()
+  }
+
+  if (state === 'closed') return null
 
   return (
     <aside
@@ -81,7 +99,15 @@ export function Sidebar({ state, admin }: SidebarProps) {
 
         {/* Footer */}
         <div className="border-t border-default pt-3 mt-2">
-          <div className={`flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-surface-2 cursor-pointer ${isNarrow ? 'justify-center' : ''}`}>
+          <div className="relative">
+          {profileOpen && (
+            <div className="absolute bottom-full left-0 right-0 z-50 mb-2 rounded-xl border border-default glass-strong p-1 shadow-lg" onClick={(event) => event.stopPropagation()}>
+              <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-xs text-default hover:bg-surface-2" onClick={() => void signOut()}>
+                <Icon name="lock" size={13} /> Sign out
+              </button>
+            </div>
+          )}
+          <button type="button" aria-expanded={profileOpen} aria-label="Open user menu" onClick={(event) => { event.stopPropagation(); setProfileOpen((open) => !open) }} className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-surface-2 cursor-pointer ${isNarrow ? 'justify-center' : ''}`}>
             <div className="avatar" style={{ width: 30, height: 30, fontSize: '10px' }}>
               {admin.name.slice(0, 2).toUpperCase()}
             </div>
@@ -91,7 +117,8 @@ export function Sidebar({ state, admin }: SidebarProps) {
                 <div className="text-[10px] text-faint truncate">{admin.email || admin.username}</div>
               </div>
             )}
-            {!isNarrow && <Icon name="chevR" size={12} className="text-faint sidebar-footer-label" />}
+            {!isNarrow && <Icon name="chevR" size={12} className={`text-faint sidebar-footer-label transition-transform ${profileOpen ? '-rotate-90' : ''}`} />}
+          </button>
           </div>
         </div>
       </div>

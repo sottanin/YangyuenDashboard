@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { WorkspaceProvider } from '@/lib/WorkspaceContext'
+import { ChartPermissionProvider } from '@/lib/ChartPermissionContext'
 
 type SidebarState = 'open' | 'narrow' | 'closed'
 interface AdminProfile {
@@ -14,12 +15,12 @@ interface AdminProfile {
   email: string | null
   role: string
   menuKeys: string[]
+  chartKeys: string[]
   allWorkspaces: boolean
 }
 
 const PAGE_LABELS: Record<string, string> = {
   '/dashboard': 'Overview',
-  '/dashboard/analytics': 'Analytics',
   '/dashboard/tokens': 'Tokens (KAP-20)',
   '/dashboard/point-tokens': 'Point Tokens (KAP-22)',
   '/dashboard/nft-redemptions': 'NFT Redemptions (KAP-721)',
@@ -66,6 +67,7 @@ export function DashboardShell({ children, admin }: { children: React.ReactNode;
 
   return (
     <WorkspaceProvider allowAllWorkspaces={admin.allWorkspaces}>
+      <ChartPermissionProvider chartKeys={admin.chartKeys}>
       <div className="grid-bg" />
       <div className="ambient-bg" />
 
@@ -78,6 +80,7 @@ export function DashboardShell({ children, admin }: { children: React.ReactNode;
         <TopBar onToggleSidebar={toggleSidebar} currentPageLabel={currentPageLabel} admin={admin} />
         <div className="min-w-0 max-w-full animate-in">{children}</div>
       </main>
+      </ChartPermissionProvider>
     </WorkspaceProvider>
   )
 }

@@ -1,6 +1,5 @@
 export const MENU_CATALOG = [
   { key: 'overview', label: 'Overview', section: 'Workspace', href: '/dashboard', icon: 'home' },
-  { key: 'analytics', label: 'Analytics', section: 'Workspace', href: '/dashboard/analytics', icon: 'bar' },
   { key: 'kap20-analysis', label: 'Tokens (KAP-20)', section: 'Blockchain', href: '/dashboard/tokens', icon: 'bar' },
   { key: 'kap22-analysis', label: 'Point Tokens (KAP-22)', section: 'Blockchain', href: '/dashboard/point-tokens', icon: 'bar' },
   { key: 'redemptions', label: 'NFT Redemptions (KAP-721)', section: 'Blockchain', href: '/dashboard/nft-redemptions', icon: 'box' },
