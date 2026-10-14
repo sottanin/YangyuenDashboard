@@ -25,7 +25,7 @@ const PAGE_LABELS: Record<string, string> = {
   '/dashboard/point-tokens': 'Point Tokens (KAP-22)',
   '/dashboard/nft-redemptions': 'NFT Redemptions (KAP-721)',
   '/dashboard/roles': 'Roles',
-  '/dashboard/wallets': 'Wallets',
+  '/dashboard/wallet-activity': 'Wallet Activity Report',
   '/dashboard/settings': 'Settings',
   '/dashboard/admin-users': 'Admin Users',
   '/dashboard/workspaces': 'Workspaces',

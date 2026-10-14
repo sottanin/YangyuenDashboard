@@ -3,7 +3,7 @@ export const MENU_CATALOG = [
   { key: 'kap20-analysis', label: 'Tokens (KAP-20)', section: 'Blockchain', href: '/dashboard/tokens', icon: 'bar' },
   { key: 'kap22-analysis', label: 'Point Tokens (KAP-22)', section: 'Blockchain', href: '/dashboard/point-tokens', icon: 'bar' },
   { key: 'redemptions', label: 'NFT Redemptions (KAP-721)', section: 'Blockchain', href: '/dashboard/nft-redemptions', icon: 'box' },
-  { key: 'wallets', label: 'Wallets', section: 'Blockchain', href: '/dashboard/wallets', icon: 'users' },
+  { key: 'wallets', label: 'Wallet Activity Report', section: 'Blockchain', href: '/dashboard/wallet-activity', icon: 'activity' },
   { key: 'batch-logs', label: 'Batch Logs', section: 'System', href: '/dashboard/batch-logs', icon: 'refresh', badge: 'Job' },
   { key: 'contracts', label: 'Contracts', section: 'System', href: '/dashboard/contracts', icon: 'doc' },
   { key: 'nft-instances', label: 'NFT Instances', section: 'System', href: '/dashboard/nft-instances', icon: 'box' },
