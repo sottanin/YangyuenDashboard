@@ -513,9 +513,8 @@ async function upsertNFTInstance(contract: RegistryToken, tokenId: string): Prom
     if (data.token?.address && normalizeAddress(data.token.address) !== normalizeAddress(contract.address)) return
     const tokenValue = extractOriginalPrice(data.metadata?.attributes)
     const normalizedTokenAddress = normalizeAddress(contract.address)
-    await prisma.nFTInstance.upsert({
-      where: { normalizedTokenAddress_id: { normalizedTokenAddress, id: tokenId } },
-      create: {
+    await prisma.nFTInstance.createMany({
+      data: [{
         id: tokenId,
         isUnique: data.is_unique ?? false,
         imageUrl: data.metadata?.image ?? null,
@@ -525,12 +524,21 @@ async function upsertNFTInstance(contract: RegistryToken, tokenId: string): Prom
         normalizedTokenAddress,
         tokenValue: tokenValue ?? null,
         visible: true,
-      },
-      update: {
+      }],
+      skipDuplicates: true,
+    })
+    await prisma.nFTInstance.update({
+      where: { normalizedTokenAddress_id: { normalizedTokenAddress, id: tokenId } },
+      data: {
         isUnique: data.is_unique ?? false,
+        ownerHash: data.owner?.hash || 'unknown',
+      },
+    })
+    await prisma.nFTInstance.updateMany({
+      where: { normalizedTokenAddress, id: tokenId, isNotReplace: false },
+      data: {
         imageUrl: data.metadata?.image ?? null,
         name: data.metadata?.name || 'Unknown NFT',
-        ownerHash: data.owner?.hash || 'unknown',
         tokenValue: tokenValue ?? null,
       },
     })
@@ -840,13 +848,18 @@ export async function runNFTInstanceUpdateJob(coordinatorId?: string): Promise<v
               where: { normalizedTokenAddress_id: { normalizedTokenAddress, id } },
               data: {
                 isUnique: data.is_unique ?? false,
+                ownerHash: data.owner?.hash || 'unknown',
+              },
+            })
+            const metadataUpdate = await prisma.nFTInstance.updateMany({
+              where: { normalizedTokenAddress, id, isNotReplace: false },
+              data: {
                 imageUrl: data.metadata?.image ?? null,
                 name: data.metadata?.name || 'Unknown NFT',
-                ownerHash: data.owner?.hash || 'unknown',
                 tokenValue: tokenValue ?? null,
               },
             })
-            totalUpdated++
+            totalUpdated += metadataUpdate.count
           } catch {
             errorCount++
           }

@@ -6,6 +6,7 @@ export const MENU_CATALOG = [
   { key: 'wallets', label: 'Wallets', section: 'Blockchain', href: '/dashboard/wallets', icon: 'users' },
   { key: 'batch-logs', label: 'Batch Logs', section: 'System', href: '/dashboard/batch-logs', icon: 'refresh', badge: 'Job' },
   { key: 'contracts', label: 'Contracts', section: 'System', href: '/dashboard/contracts', icon: 'doc' },
+  { key: 'nft-instances', label: 'NFT Instances', section: 'System', href: '/dashboard/nft-instances', icon: 'box' },
   { key: 'workspaces', label: 'Workspaces', section: 'System', href: '/dashboard/workspaces', icon: 'target' },
   { key: 'admin-users', label: 'Admin Users', section: 'System', href: '/dashboard/admin-users', icon: 'users' },
   { key: 'roles', label: 'Roles', section: 'System', href: '/dashboard/roles', icon: 'lock' },

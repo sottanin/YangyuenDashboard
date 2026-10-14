@@ -31,6 +31,7 @@ const PAGE_LABELS: Record<string, string> = {
   '/dashboard/workspaces': 'Workspaces',
   '/dashboard/batch-logs': 'Batch Logs',
   '/dashboard/contracts': 'Contracts',
+  '/dashboard/nft-instances': 'NFT Instances',
 }
 
 export function DashboardShell({ children, admin }: { children: React.ReactNode; admin: AdminProfile }) {

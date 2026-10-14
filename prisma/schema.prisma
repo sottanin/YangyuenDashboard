@@ -124,6 +124,7 @@ model NFTInstance {
   normalizedTokenAddress String
   tokenValue             Decimal?
   visible                Boolean  @default(true)
+  isNotReplace           Boolean  @default(false)
 
   @@id([normalizedTokenAddress, id])
   @@index([tokenAddress])
