@@ -13,11 +13,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!canAccessWorkspace(admin, workspace)) return NextResponse.json({ error: 'Workspace access denied' }, { status: 403 })
   try {
     const summary = await getNftRedemptionsSummary(workspace)
+    const canViewNftMetadata = canAccessAnyChart(admin, ['nft.nft-mint', 'nft.nft-burn'])
+    const canViewKap20Metadata = canAccessAnyChart(admin, ['nft.kap20-burn', 'nft.kap20-fee'])
     return NextResponse.json({ ...summary,
       nftMint: canAccessChart(admin, 'nft.nft-mint') ? summary.nftMint : 0,
       nftBurn: canAccessChart(admin, 'nft.nft-burn') ? summary.nftBurn : 0,
+      nftSymbol: canViewNftMetadata ? summary.nftSymbol : 'NFT',
+      nftImageUrl: canViewNftMetadata ? summary.nftImageUrl : null,
       kap20Burn: canAccessChart(admin, 'nft.kap20-burn') ? summary.kap20Burn : '0',
       kap20Fee: canAccessChart(admin, 'nft.kap20-fee') ? summary.kap20Fee : '0',
+      kap20Symbol: canViewKap20Metadata ? summary.kap20Symbol : 'KAP-20',
+      kap20ImageUrl: canViewKap20Metadata ? summary.kap20ImageUrl : null,
     })
   } catch (error) {
     console.error('NFT redemption summary error:', error)

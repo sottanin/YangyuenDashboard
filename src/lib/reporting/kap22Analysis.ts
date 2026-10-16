@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { classifyFlow, type FlowClassification } from './classifyFlow'
 import { getReportingConfig } from '@/lib/system/config'
 import { normalizeAddress } from '@/lib/system/addresses'
-import { walletBalanceColumnForTokenAddress, walletBalanceFieldForTokenAddress } from '@/lib/walletBalances'
+import { walletBalanceColumnForTokenAddress, walletBalanceFieldForTokenAddress, walletExpiredBalanceColumnForTokenAddress } from '@/lib/walletBalances'
 import { getWorkspaceReportScope, type WorkspaceReportScope } from './workspaceScope'
 import { reportingDaySql } from './reportingDay'
 
@@ -27,11 +27,13 @@ export interface Kap22DailyPoint {
 
 export interface Kap22Summary {
   token: Kap22TokenOption
+  totalTransactions: number
   distributorPool: string
   operationPool: string
   mint: string
   transferToUsers: string
   burn: string
+  expired: string
   reconciliationDelta: string
   reconciliationMatched: boolean
   daily: Kap22DailyPoint[]
@@ -81,6 +83,14 @@ interface DailyAggregateRow {
   day: Date | string
   total_transactions: bigint | number | string
   total_amount: Prisma.Decimal | string | null
+}
+
+interface TotalTransactionRow {
+  total_transactions: bigint | number | string
+}
+
+interface ExpiredBalanceRow {
+  total_expired: Prisma.Decimal | string | null
 }
 
 interface TopUserRow {
@@ -176,7 +186,7 @@ async function reportContext(tokenAddress: string, workspaceSelection: number | 
   }
 }
 
-export async function getKap22Summary(tokenAddress: string, workspaceSelection: number | 'all'): Promise<Kap22Summary | null> {
+export async function getKap22Summary(tokenAddress: string, workspaceSelection: number | 'all', options: { includeExpired?: boolean } = {}): Promise<Kap22Summary | null> {
   const context = await reportContext(tokenAddress, workspaceSelection)
   if (!context) return null
   const zeroSql = addressSql(context.zeroAddresses)
@@ -186,8 +196,9 @@ export async function getKap22Summary(tokenAddress: string, workspaceSelection: 
     ? Prisma.empty
     : Prisma.sql`AND LOWER("tokenAddress") IN (${Prisma.join(context.scope.tokenAddresses)})`
   const reportingDay = reportingDaySql(Prisma.raw('"timestamp"'), context.timezone)
+  const expiredBalanceColumn = options.includeExpired ? walletExpiredBalanceColumnForTokenAddress(context.normalizedToken) : null
 
-  const [totals, dailyRows] = await Promise.all([
+  const [totals, dailyRows, transactionRows] = await Promise.all([
     prisma.$queryRaw<NumericAggregateRow[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(CASE WHEN LOWER("toHash") = ANY(${distributorSql}) THEN value ELSE 0 END), 0)
@@ -249,6 +260,16 @@ export async function getKap22Summary(tokenAddress: string, workspaceSelection: 
       GROUP BY day
       ORDER BY day ASC
     `),
+    prisma.$queryRaw<TotalTransactionRow[]>(Prisma.sql`
+      SELECT COUNT(DISTINCT header."txId")::bigint AS total_transactions
+      FROM "TransactionHeader" header
+      INNER JOIN "TransactionDetail" detail ON detail."txId" = header."txId"
+      WHERE LOWER(detail."tokenAddress") = ${context.normalizedToken}
+        AND header."timestamp" >= ${context.historyStart}
+        ${context.scope.tokenAddresses === null
+          ? Prisma.empty
+          : Prisma.sql`AND LOWER(detail."tokenAddress") IN (${Prisma.join(context.scope.tokenAddresses)})`}
+    `),
   ])
 
   const dailyMap = new Map(dailyRows.map((row) => {
@@ -274,6 +295,20 @@ export async function getKap22Summary(tokenAddress: string, workspaceSelection: 
     })
   }
   const total = totals[0]
+  const expiredRows = expiredBalanceColumn ? await prisma.$queryRaw<ExpiredBalanceRow[]>(Prisma.sql`
+    WITH latest_wallet_snapshots AS (
+      SELECT
+        wallet.${expiredBalanceColumn} AS expired,
+        ROW_NUMBER() OVER (
+          PARTITION BY LOWER(wallet."walletId")
+          ORDER BY wallet."timestamp" DESC NULLS LAST, wallet.id DESC
+        ) AS snapshot_rank
+      FROM "Wallet" wallet
+    )
+    SELECT COALESCE(SUM(expired), 0) AS total_expired
+    FROM latest_wallet_snapshots
+    WHERE snapshot_rank = 1
+  `) : []
   const distributorPool = new Prisma.Decimal(decimalString(total?.distributor_pool))
   const operationPool = new Prisma.Decimal(decimalString(total?.operation_pool))
   const mint = new Prisma.Decimal(decimalString(total?.mint))
@@ -283,11 +318,13 @@ export async function getKap22Summary(tokenAddress: string, workspaceSelection: 
   const reconciliationDelta = mint.minus(distributorPool.plus(operationPool).plus(transferToUsers).plus(burn))
   return {
     token: context.token,
+    totalTransactions: Number(transactionRows[0]?.total_transactions ?? 0),
     distributorPool: distributorPool.toString(),
     operationPool: operationPool.toString(),
     mint: mint.toString(),
     transferToUsers: transferToUsers.toString(),
     burn: burn.toString(),
+    expired: decimalString(expiredRows[0]?.total_expired),
     reconciliationDelta: reconciliationDelta.toString(),
     reconciliationMatched: reconciliationDelta.isZero(),
     daily,

@@ -14,6 +14,7 @@ import { Heatmap } from '@/components/charts/Heatmap'
 import { useWorkspace } from '@/lib/WorkspaceContext'
 import { TokenAvatar } from '@/components/ui/TokenAvatar'
 import { useChartPermissions } from '@/lib/ChartPermissionContext'
+import { AddressLink } from '@/components/ui/AddressLink'
 
 interface TokenOption { id: string; name: string; symbol: string; address: string; imageUrl: string | null }
 interface ChartAnnotation { id: string; date: string; event: string; createdAt: string; updatedAt: string }
@@ -25,11 +26,13 @@ interface SummaryResponse {
   mint: string
   transferToUsers: string
   burn: string
+  expired: string
   reconciliationDelta: string
   reconciliationMatched: boolean
   daily: Array<{ date: string; totalTransactions: number; totalAmount: string }>
   timezone: string
   historyStart: string
+  totalTransactions?: number
   backupWallet?: string
   workspaceWallet?: string
   userWallet?: string
@@ -88,8 +91,10 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
   const canViewOperationPool = !isKap20 && canViewChart('kap22.operation-pool')
   const canViewUserWallet = canViewChart(chartKey('user-wallet'))
   const canViewBurn = canViewChart(isKap20 ? 'kap20.redemption-burn' : 'kap22.burn-wallet')
-  const canViewKpis = canViewMint || canViewBackupWallet || canViewWorkspaceWallet || canViewDistributorPool || canViewOperationPool || canViewUserWallet || canViewBurn
+  const canViewExpired = !isKap20 && canViewChart('kap22.expired')
   const canViewDailyCount = canViewChart(chartKey('daily-transaction-count'))
+  const canViewTotalTransactions = !isKap20 && canViewDailyCount
+  const canViewKpis = canViewTotalTransactions || canViewMint || canViewBackupWallet || canViewWorkspaceWallet || canViewDistributorPool || canViewOperationPool || canViewUserWallet || canViewBurn || canViewExpired
   const canViewDailyVolume = canViewChart(chartKey('daily-transfer-volume'))
   const canViewHeatmap = canViewChart(chartKey('activity-heatmap'))
   const canViewConversion = isKap20 && canViewChart('kap20.conversion-balance')
@@ -415,6 +420,7 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
       {canViewKpis && <div>{summaryError ? <div className="mb-4"><ErrorCard message={summaryError} onRetry={() => selectedToken && void loadSummary(selectedToken)} /></div> : summaryLoading || !summary ? (
         <section aria-label={`${reportLabel} key performance indicators`} aria-live="polite" className={`mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 ${isKap20 ? 'xl:grid-cols-3' : 'xl:grid-cols-5'}`}>{Array.from({ length: isKap20 ? 6 : 5 }, (_, key) => <SkeletonKpi key={key} />)}</section>
       ) : <section aria-label={`${reportLabel} key performance indicators`} aria-live="polite" className={`mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 ${isKap20 ? 'xl:grid-cols-3' : 'xl:grid-cols-5'}`}>
+        {canViewTotalTransactions && <KpiTile label="Total Transactions" value={(summary.totalTransactions ?? 0).toLocaleString('en-US')} icon="pulse" />}
         {canViewMint && <KpiTile label="Mint" value={`${formatAmount(summary.mint)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="arrowUp" sparkColor="var(--success)" />}
         {canViewBackupWallet && <KpiTile label="Backup Wallet" value={`${formatAmount(summary.backupWallet ?? '0')} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="target" sparkColor="var(--accent-3)" />}
         {canViewWorkspaceWallet && <KpiTile label="Workspace Wallet" value={`${formatAmount(summary.workspaceWallet ?? '0')} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="lock" sparkColor="var(--accent-2)" />}
@@ -422,6 +428,7 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
         {canViewOperationPool && <KpiTile label="OperationPool" value={`${formatAmount(summary.operationPool)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="target" sparkColor="var(--accent-3)" />}
         {canViewUserWallet && <KpiTile label="User Wallet" value={`${formatAmount(isKap20 ? summary.userWallet ?? '0' : summary.transferToUsers)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="users" sparkColor="var(--accent-2)" />}
         {canViewBurn && <KpiTile label={isKap20 ? 'Redemption (Burn)' : 'Burn Wallet'} value={`${formatAmount(isKap20 ? summary.redemptionBurn ?? '0' : summary.burn)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="refresh" sparkColor="var(--danger)" />}
+        {canViewExpired && <KpiTile label="Expired" value={`${formatAmount(summary.expired)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="alert" sparkColor="var(--danger)" />}
       </section>}</div>}
 
       {canViewKpis && summary && !summary.reconciliationMatched ? <div className="mb-4" role="status">
@@ -475,8 +482,8 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
             <tbody>{transactions.rows.map((row) => <tr key={row.key || row.id} className="tbl-row border-b border-default last:border-0">
               <td className="px-5 py-3"><a href={`https://www.kubscan.com/tx/${encodeURIComponent(row.txId)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-mono text-xs text-default hover:text-accent" title={row.txId} aria-label={`Open transaction ${row.txId} on KubScan`}>{compactAddress(row.txId)}<Icon name="external" size={12} /></a><div className="mt-1 text-[10px] text-faint">{row.flow.replaceAll('_', ' ')}</div></td>
               <td className="px-3 py-3"><span className={`pill ${row.type === 'Mint' ? 'pill-success' : row.type === 'Burn' ? 'pill-danger' : 'pill-muted'}`}>{row.type}</span></td>
-              <td className="px-3 py-3"><a href={`https://www.kubscan.com/address/${encodeURIComponent(row.fromHash)}?tab=token_transfers`} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1.5 text-xs text-muted hover:text-accent ${row.fromName ? 'font-medium' : 'font-mono'}`} title={row.fromName ? `${row.fromName} — ${row.fromHash}` : row.fromHash} aria-label={`Open From wallet ${row.fromName ? `${row.fromName}, ` : ''}${row.fromHash} on KubScan`}><Icon name={row.fromName ? 'gear' : 'user'} size={12} />{row.fromName ?? compactAddress(row.fromHash)}<Icon name="external" size={12} /></a></td>
-              <td className="px-3 py-3"><a href={`https://www.kubscan.com/address/${encodeURIComponent(row.toHash)}?tab=token_transfers`} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1.5 text-xs text-muted hover:text-accent ${row.toName ? 'font-medium' : 'font-mono'}`} title={row.toName ? `${row.toName} — ${row.toHash}` : row.toHash} aria-label={`Open To wallet ${row.toName ? `${row.toName}, ` : ''}${row.toHash} on KubScan`}><Icon name={row.toName ? 'gear' : 'user'} size={12} />{row.toName ?? compactAddress(row.toHash)}<Icon name="external" size={12} /></a></td>
+              <td className="px-3 py-3"><AddressLink address={row.fromHash} name={row.fromName} /></td>
+              <td className="px-3 py-3"><AddressLink address={row.toHash} name={row.toName} /></td>
               <td className="px-3 py-3 text-right"><span className="inline-flex items-center justify-end gap-2 font-mono text-xs text-default">{formatAmount(row.value)} {row.tokenSymbol}<TokenAvatar src={selectedOption?.imageUrl} symbol={row.tokenSymbol} size="sm" /></span></td>
               <td className="whitespace-nowrap px-3 py-3 text-xs text-muted">{formatTimestamp(row.timestamp, summary?.timezone ?? 'Asia/Bangkok')}</td>
               <td className="px-3 py-3"><span className={`pill ${['ok', 'success'].includes((row.status ?? '').toLowerCase()) ? 'pill-success' : 'pill-muted'}`}>{row.status ?? 'Unknown'}</span></td>

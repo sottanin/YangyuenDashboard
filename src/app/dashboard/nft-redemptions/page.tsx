@@ -11,8 +11,9 @@ import { SkeletonKpi, SkeletonTable } from '@/components/ui/SkeletonCard'
 import { TokenAvatar } from '@/components/ui/TokenAvatar'
 import { useWorkspace } from '@/lib/WorkspaceContext'
 import { useChartPermissions } from '@/lib/ChartPermissionContext'
+import { AddressLink } from '@/components/ui/AddressLink'
 
-interface SummaryResponse { nftMint: number; nftBurn: number; kap20Burn: string; kap20Fee: string; kap20Symbol: string; timezone: string }
+interface SummaryResponse { nftMint: number; nftBurn: number; nftSymbol: string; nftImageUrl: string | null; kap20Burn: string; kap20Fee: string; kap20Symbol: string; kap20ImageUrl: string | null; timezone: string }
 interface TransactionRow {
   id: string
   txId: string
@@ -51,7 +52,6 @@ async function readResponse<T>(response: Response): Promise<T> {
   }
   return data as T
 }
-
 export default function NftRedemptionsPage(): React.JSX.Element {
   const { canViewChart } = useChartPermissions()
   const canViewNftMint = canViewChart('nft.nft-mint')
@@ -149,10 +149,10 @@ export default function NftRedemptionsPage(): React.JSX.Element {
     {!hasVisibleContent ? <section role="status" className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-default px-6 py-12 text-center"><h2 className="text-base font-semibold text-default">No report content available</h2><p className="mt-2 max-w-md text-sm text-muted">Your role allows access to this menu, but no charts or content are assigned. Contact an administrator if you need access.</p></section> : null}
 
     {canViewKpis && <div>{summaryError ? <div className="mb-4"><ErrorCard message={summaryError} onRetry={() => void loadSummary()} /></div> : summaryLoading || !summary ? <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: [canViewNftMint, canViewNftBurn, canViewKap20Burn, canViewKap20Fee].filter(Boolean).length }, (_, index) => <SkeletonKpi key={index} />)}</div> : <section className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="NFT redemption key performance indicators">
-      {canViewNftMint && <KpiTile label="NFT Mint" value={`${summary.nftMint.toLocaleString()} NFTs`} icon="arrowUp" sparkColor="var(--success)" />}
-      {canViewNftBurn && <KpiTile label="NFT Burn" value={`${summary.nftBurn.toLocaleString()} NFTs`} icon="flame" sparkColor="var(--danger)" />}
-      {canViewKap20Burn && <KpiTile label="Token (KAP-20) Burn" value={`${formatAmount(summary.kap20Burn)} ${summary.kap20Symbol}`} icon="refresh" sparkColor="var(--danger)" />}
-      {canViewKap20Fee && <KpiTile label="Token (KAP-20) Fee" value={`${formatAmount(summary.kap20Fee)} ${summary.kap20Symbol}`} icon="target" sparkColor="var(--warn)" />}
+      {canViewNftMint && <KpiTile label="NFT Mint" value={`${summary.nftMint.toLocaleString()} NFTs`} valueTrailing={<TokenAvatar src={summary.nftImageUrl} symbol={summary.nftSymbol} size="sm" />} icon="arrowUp" sparkColor="var(--success)" />}
+      {canViewNftBurn && <KpiTile label="NFT Burn" value={`${summary.nftBurn.toLocaleString()} NFTs`} valueTrailing={<TokenAvatar src={summary.nftImageUrl} symbol={summary.nftSymbol} size="sm" />} icon="flame" sparkColor="var(--danger)" />}
+      {canViewKap20Burn && <KpiTile label="Token (KAP-20) Burn" value={`${formatAmount(summary.kap20Burn)} ${summary.kap20Symbol}`} valueTrailing={<TokenAvatar src={summary.kap20ImageUrl} symbol={summary.kap20Symbol} size="sm" />} icon="refresh" sparkColor="var(--danger)" />}
+      {canViewKap20Fee && <KpiTile label="Token (KAP-20) Fee" value={`${formatAmount(summary.kap20Fee)} ${summary.kap20Symbol}`} valueTrailing={<TokenAvatar src={summary.kap20ImageUrl} symbol={summary.kap20Symbol} size="sm" />} icon="target" sparkColor="var(--warn)" />}
     </section>}</div>}
 
     {canViewRankings && <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-2" aria-label="NFT rankings">
@@ -194,8 +194,4 @@ export default function NftRedemptionsPage(): React.JSX.Element {
       </>}
     </Card>}
   </div>
-}
-
-function AddressLink({ address, name }: { address: string; name: string | null }): React.JSX.Element {
-  return <a href={`https://www.kubscan.com/address/${encodeURIComponent(address)}?tab=token_transfers`} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1.5 text-xs text-muted hover:text-accent ${name ? 'font-medium' : 'font-mono'}`} title={name ? `${name} — ${address}` : address}><Icon name={name ? 'gear' : 'user'} size={12} />{name ?? compactAddress(address)}<Icon name="external" size={12} /></a>
 }

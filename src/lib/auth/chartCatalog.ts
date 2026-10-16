@@ -28,6 +28,7 @@ export const CHART_CATALOG: readonly ChartCatalogItem[] = [
   { key: 'kap22.operation-pool', label: 'OperationPool', menuKey: 'kap22-analysis' },
   { key: 'kap22.user-wallet', label: 'User Wallet', menuKey: 'kap22-analysis' },
   { key: 'kap22.burn-wallet', label: 'Burn Wallet', menuKey: 'kap22-analysis' },
+  { key: 'kap22.expired', label: 'Expired', menuKey: 'kap22-analysis' },
   { key: 'kap22.daily-transaction-count', label: 'Daily Transaction Count', menuKey: 'kap22-analysis' },
   { key: 'kap22.daily-transfer-volume', label: 'Daily Token Transfer Volume', menuKey: 'kap22-analysis' },
   { key: 'kap22.activity-heatmap', label: 'Activity Heatmap', menuKey: 'kap22-analysis' },

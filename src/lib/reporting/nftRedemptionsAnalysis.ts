@@ -30,12 +30,14 @@ async function reportContext(workspace: number | 'all') {
   const [config, nftContracts, kap20Contracts, addresses, allAddressContracts, allTokenContracts] = await Promise.all([
     getReportingConfig(),
     prisma.tokenContract.findMany({
-      where: { standard: 'KAP-721', ...workspaceWhere },
-      select: { normalizedAddress: true },
+      where: { standard: 'KAP-721', active: true, ...workspaceWhere },
+      select: { id: true, normalizedAddress: true, symbol: true, name: true, imageKey: true },
+      orderBy: { normalizedAddress: 'asc' },
     }),
     prisma.tokenContract.findMany({
-      where: { standard: 'KAP-20', role: 'PRIMARY_TOKEN', ...workspaceWhere },
-      select: { normalizedAddress: true, symbol: true },
+      where: { standard: 'KAP-20', role: 'PRIMARY_TOKEN', active: true, ...workspaceWhere },
+      select: { id: true, normalizedAddress: true, symbol: true, imageKey: true },
+      orderBy: { normalizedAddress: 'asc' },
     }),
     prisma.addressContract.findMany({
       where: { role: { in: ['ZERO', 'MARKETPLACE', 'MARKETPLACE_FEE'] }, ...addressWorkspaceWhere },
@@ -47,8 +49,11 @@ async function reportContext(workspace: number | 'all') {
 
   return {
     nftAddresses: nftContracts.map((contract) => contract.normalizedAddress),
+    nftSymbol: nftContracts[0]?.symbol ?? nftContracts[0]?.name ?? 'NFT',
+    nftImageUrl: nftContracts[0]?.imageKey ? `/api/contracts/token/${nftContracts[0].id}/image` : null,
     kap20Addresses: kap20Contracts.map((contract) => contract.normalizedAddress),
     kap20Symbol: kap20Contracts[0]?.symbol ?? 'KAP-20',
+    kap20ImageUrl: kap20Contracts[0]?.imageKey ? `/api/contracts/token/${kap20Contracts[0].id}/image` : null,
     historyStart: new Date(config.businessHistoryStart),
     timezone: config.reportingTimezone,
     zeroAddresses: addresses.filter((address) => address.role === 'ZERO').map((address) => address.normalizedAddress),
@@ -61,7 +66,7 @@ async function reportContext(workspace: number | 'all') {
 export async function getNftRedemptionsSummary(workspace: number | 'all') {
   const context = await reportContext(workspace)
   if (context.nftAddresses.length === 0) {
-    return { nftMint: 0, nftBurn: 0, kap20Burn: '0', kap20Fee: '0', kap20Symbol: context.kap20Symbol, timezone: context.timezone }
+    return { nftMint: 0, nftBurn: 0, nftSymbol: context.nftSymbol, nftImageUrl: context.nftImageUrl, kap20Burn: '0', kap20Fee: '0', kap20Symbol: context.kap20Symbol, kap20ImageUrl: context.kap20ImageUrl, timezone: context.timezone }
   }
 
   const fromUserWallet = {
@@ -102,9 +107,12 @@ export async function getNftRedemptionsSummary(workspace: number | 'all') {
   return {
     nftMint,
     nftBurn,
+    nftSymbol: context.nftSymbol,
+    nftImageUrl: context.nftImageUrl,
     kap20Burn: kap20Burn._sum.value?.toString() ?? '0',
     kap20Fee: kap20Fee._sum.value?.toString() ?? '0',
     kap20Symbol: context.kap20Symbol,
+    kap20ImageUrl: context.kap20ImageUrl,
     timezone: context.timezone,
   }
 }

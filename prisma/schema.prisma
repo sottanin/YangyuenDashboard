@@ -145,6 +145,15 @@ model Wallet {
   HLT              Decimal   @default(0)
   SCT              Decimal   @default(0)
   GVT              Decimal   @default(0)
+  FIT_EXPIRED      Decimal   @default(0)
+  TGT_EXPIRED      Decimal   @default(0)
+  INT_EXPIRED      Decimal   @default(0)
+  GRN_EXPIRED      Decimal   @default(0)
+  YYN_EXPIRED      Decimal   @default(0)
+  EVT_EXPIRED      Decimal   @default(0)
+  HLT_EXPIRED      Decimal   @default(0)
+  SCT_EXPIRED      Decimal   @default(0)
+  GVT_EXPIRED      Decimal   @default(0)
 
   @@index([walletId])
 }

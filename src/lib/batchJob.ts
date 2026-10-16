@@ -3,8 +3,12 @@ import { Prisma } from '@prisma/client'
 import { isValidAddress, normalizeAddress } from './system/addresses'
 import {
   WALLET_BALANCE_FIELD_BY_TOKEN_ADDRESS,
+  WALLET_EXPIRED_BALANCE_FIELD_BY_TOKEN_ADDRESS,
   type WalletBalanceField,
+  type WalletExpiredBalanceField,
+  type WalletSnapshotBalanceField,
 } from './walletBalances'
+import { readExpiredBalances } from './blockchain/readExpiredBalance'
 
 const KUBSCAN_BASE = 'https://www.kubscan.com/api/v2/tokens'
 const KUBSCAN_ADDR = 'https://www.kubscan.com/api/v2/addresses'
@@ -302,7 +306,7 @@ export function mapCanonicalTokenBalance(item: unknown):
   }
 }
 
-function zeroWalletBalances(): Record<WalletBalanceField, Prisma.Decimal> {
+function zeroWalletBalances(): Record<WalletSnapshotBalanceField, Prisma.Decimal> {
   return {
     ICCYYN: new Prisma.Decimal(0),
     FIT: new Prisma.Decimal(0),
@@ -314,6 +318,15 @@ function zeroWalletBalances(): Record<WalletBalanceField, Prisma.Decimal> {
     HLT: new Prisma.Decimal(0),
     SCT: new Prisma.Decimal(0),
     GVT: new Prisma.Decimal(0),
+    FIT_EXPIRED: new Prisma.Decimal(0),
+    TGT_EXPIRED: new Prisma.Decimal(0),
+    INT_EXPIRED: new Prisma.Decimal(0),
+    GRN_EXPIRED: new Prisma.Decimal(0),
+    YYN_EXPIRED: new Prisma.Decimal(0),
+    EVT_EXPIRED: new Prisma.Decimal(0),
+    HLT_EXPIRED: new Prisma.Decimal(0),
+    SCT_EXPIRED: new Prisma.Decimal(0),
+    GVT_EXPIRED: new Prisma.Decimal(0),
   }
 }
 
@@ -399,7 +412,33 @@ export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
     totalFetched = allWallets.length
     console.log(`[WalletSync] Fetching balances for ${totalFetched} wallets`)
 
-    const snapshots = new Map<string, Record<WalletBalanceField, Prisma.Decimal>>()
+    const activePointTokenRegistry = await prisma.tokenContract.findMany({
+      where: { active: true, role: 'POINT_TOKEN', standard: 'KAP-22' },
+      select: { address: true, normalizedAddress: true, decimals: true },
+      orderBy: { normalizedAddress: 'asc' },
+    })
+    const activePointTokenContracts: Array<{ address: string; expiredField: WalletExpiredBalanceField }> = []
+    const seenContractAddresses = new Set<string>()
+    const seenExpiredFields = new Set<WalletExpiredBalanceField>()
+    for (const contract of activePointTokenRegistry) {
+      const rawAddress = normalizeAddress(contract.address)
+      const registryAddress = normalizeAddress(contract.normalizedAddress)
+      if (rawAddress !== registryAddress) throw new Error(`Point Token registry address mismatch for ${contract.address}`)
+      const expiredField = WALLET_EXPIRED_BALANCE_FIELD_BY_TOKEN_ADDRESS[registryAddress]
+      if (!expiredField) continue
+      if (contract.decimals !== CANONICAL_TOKEN_DECIMALS) {
+        throw new Error(`Active Point Token ${contract.address} must declare exactly 18 decimals`)
+      }
+      if (!isValidAddress(contract.address)) throw new Error(`Active Point Token has invalid contract address: ${contract.address}`)
+      if (seenContractAddresses.has(registryAddress)) throw new Error(`Duplicate active Point Token contract: ${registryAddress}`)
+      if (seenExpiredFields.has(expiredField)) throw new Error(`Duplicate expired wallet field mapping: ${expiredField}`)
+      seenContractAddresses.add(registryAddress)
+      seenExpiredFields.add(expiredField)
+      activePointTokenContracts.push({ address: registryAddress, expiredField })
+    }
+    if (activePointTokenContracts.length > 9) throw new Error('Too many supported active Point Token contracts')
+
+    const snapshots = new Map<string, Record<WalletSnapshotBalanceField, Prisma.Decimal>>()
 
     for (const wallet of allWallets) {
       const currentLog = await prisma.batchJobLog.findUnique({
@@ -435,6 +474,15 @@ export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
           const mapped = mapCanonicalTokenBalance(item)
           if (!mapped) continue
           update[mapped.field] = mapped.value
+        }
+
+        await assertJobRunning(log.id, coordinatorId)
+        const expiredBalances = await readExpiredBalances(activePointTokenContracts.map((contract) => contract.address), wallet.walletId)
+        await assertJobRunning(log.id, coordinatorId)
+        for (const contract of activePointTokenContracts) {
+          const expiredBalance = expiredBalances.get(contract.address)
+          if (expiredBalance === undefined) throw new Error(`Missing expired balance for ${contract.address}`)
+          update[contract.expiredField] = new Prisma.Decimal(expiredBalance)
         }
         snapshots.set(wallet.walletId, update)
       } catch (err) {
