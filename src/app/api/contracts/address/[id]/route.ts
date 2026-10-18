@@ -45,7 +45,7 @@ export async function DELETE(_req: NextRequest, { params }: RouteContext): Promi
   const record = await prisma.addressContract.findUnique({ where: { id }, include: { workspace: { select: { name: true } } } })
   if (!record) return NextResponse.json({ error: 'System address not found' }, { status: 404 })
   if (record.workspace?.name === 'SYSTEM' || await isSystemAddressUsed(record.normalizedAddress)) {
-    const updated = await prisma.addressContract.update({ where: { id }, data: { active: false, effectiveTo: new Date() } })
+    const updated = await prisma.addressContract.update({ where: { id }, data: { active: false, aggregateAcrossWorkspaces: false, effectiveTo: new Date() } })
     return NextResponse.json({ success: true, deactivated: true, record: updated })
   }
   await prisma.addressContract.delete({ where: { id } })

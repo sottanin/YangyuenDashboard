@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useId, useRef, useState, type PointerEvent } from 'react'
-import { fmt, smoothPath } from './chartUtils'
+import { smoothPath } from './chartUtils'
 import { useResolvedColors } from './useResolvedColors'
 
 export interface SingleLinePoint {
@@ -23,14 +23,18 @@ interface SingleLineChartProps {
 function formatValue(value: number, kind: 'count' | 'amount'): string {
   const safeValue = Number.isFinite(value) ? value : 0
   if (kind === 'count') return Math.round(safeValue).toLocaleString('en-US')
-  return safeValue.toLocaleString('en-US', { maximumFractionDigits: 4 })
+  return safeValue.toLocaleString('en-US', { maximumFractionDigits: 18 })
 }
 
 function formatAverage(value: number, kind: 'count' | 'amount'): string {
   const safeValue = Number.isFinite(value) ? value : 0
   return safeValue.toLocaleString('en-US', {
-    maximumFractionDigits: kind === 'count' ? 2 : 4,
+    maximumFractionDigits: kind === 'count' ? 2 : 18,
   })
+}
+
+function formatAxisLabel(label: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(label) ? label.slice(5) : label
 }
 
 export function SingleLineChart({
@@ -110,9 +114,9 @@ export function SingleLineChart({
     </div>
     <div
       ref={containerRef}
-      className="relative h-[300px] w-full max-w-full overflow-hidden"
+      className="relative w-full max-w-full overflow-hidden"
       role="img"
-      aria-label={`${label} by day`}
+      aria-label={`${label} trend`}
       onPointerMove={handlePointerMove}
       onPointerLeave={() => setHovered(null)}
     >
@@ -125,9 +129,9 @@ export function SingleLineChart({
         </defs>
         {ticks.map((value, index) => <g key={index}>
           <line x1={left} x2={width - right} y1={y(value)} y2={y(value)} stroke="rgb(var(--grid))" strokeDasharray="3 3" />
-          <text x={left - 9} y={y(value) + 4} textAnchor="end" fontSize="10.5" fill="rgb(var(--text-faint))">{fmt(value)}</text>
+          <text x={left - 9} y={y(value) + 4} textAnchor="end" fontSize="10.5" fill="rgb(var(--text-faint))">{formatValue(value, valueKind)}</text>
         </g>)}
-        {data.map((point, index) => index % labelStep === 0 || index === data.length - 1 ? <text key={point.label} x={x(index)} y={height - 10} textAnchor="middle" fontSize="10.5" fill="rgb(var(--text-faint))">{point.label.slice(5)}</text> : null)}
+        {data.map((point, index) => index % labelStep === 0 || index === data.length - 1 ? <text key={point.label} x={x(index)} y={height - 10} textAnchor="middle" fontSize="10.5" fill="rgb(var(--text-faint))">{formatAxisLabel(point.label)}</text> : null)}
         <path d={areaPath} fill={`url(#${gradientId})`} pointerEvents="none" />
         <line x1={left} x2={width - right} y1={y(average)} y2={y(average)} stroke={lineColor} strokeWidth="1.5" strokeDasharray="7 5" opacity="0.8" />
         <text x={width - right} y={Math.max(top + 10, y(average) - 6)} textAnchor="end" fontSize="10.5" fill={lineColor}>Avg {formatAverage(average, valueKind)} {averageUnit}</text>
@@ -150,7 +154,7 @@ export function SingleLineChart({
       </div> : null}
     </div>
     <div className="sr-only">
-      <p>{label} by day.</p>
+      <p>{label} trend.</p>
       <p>Average for the selected period: {formatAverage(average, valueKind)} {tooltipUnit}.</p>
       <ul>{data.map((point) => <li key={point.label}>{point.label}: {formatValue(point.value, valueKind)} {tooltipUnit}.</li>)}</ul>
     </div>

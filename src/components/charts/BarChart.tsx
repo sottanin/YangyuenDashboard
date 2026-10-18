@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useId, useRef, useState } from 'react'
-import { fmt } from './chartUtils'
+import { fmt, formatDecimalAmount } from './chartUtils'
 import { useResolvedColors } from './useResolvedColors'
 
 interface BarKey {
@@ -20,7 +20,10 @@ interface BarChartProps {
   color?: string
   stacked?: boolean
   keys?: BarKey[]
-  tooltipValueFormat?: 'compact' | 'integer'
+  tooltipValueFormat?: 'compact' | 'integer' | 'amount'
+  showLegend?: boolean
+  showValues?: boolean
+  groupWidthRatio?: number
 }
 
 export function BarChart({
@@ -32,6 +35,9 @@ export function BarChart({
   stacked = false,
   keys,
   tooltipValueFormat = 'compact',
+  showLegend = false,
+  showValues = false,
+  groupWidthRatio = 0.7,
 }: BarChartProps) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const gradientId = useId()
@@ -40,6 +46,20 @@ export function BarChart({
   const groupKeys: BarKey[] = keys || [{ key: valueKey, color, label: valueKey }]
   const colorList = useResolvedColors(groupKeys.map((k) => k.color))
   const resolvedGroupKeys = groupKeys.map((k, i) => ({ ...k, _color: colorList[i] }))
+  const formatValue = (value: string | number): string => {
+    const numeric = Number(value)
+    if (tooltipValueFormat === 'integer') return Math.round(Number.isFinite(numeric) ? numeric : 0).toLocaleString('en-US')
+    if (tooltipValueFormat === 'amount') {
+      return formatDecimalAmount(value)
+    }
+    return fmt(Number.isFinite(numeric) ? numeric : 0)
+  }
+  const formatAxisValue = (value: number): string => {
+    if (tooltipValueFormat === 'amount') {
+      return value.toLocaleString('en-US', { maximumFractionDigits: 6 })
+    }
+    return formatValue(value)
+  }
 
   useEffect(() => {
     if (!wrapRef.current) return
@@ -71,7 +91,7 @@ export function BarChart({
   const max = maxValue > 0 ? maxValue * 1.1 : 1
 
   const bandW = innerW / (data.length || 1)
-  const groupW = bandW * 0.7
+  const groupW = bandW * Math.min(0.9, Math.max(0.2, groupWidthRatio))
   const barW = stacked ? groupW : groupW / groupKeys.length
 
   const yScale = (v: number) => padT + innerH - (v / max) * innerH
@@ -79,7 +99,8 @@ export function BarChart({
   const tickVals = Array.from({ length: yTicks + 1 }, (_, i) => (max / yTicks) * i)
 
   return (
-    <div ref={wrapRef} className="relative w-full" style={{ height }}>
+    <div ref={wrapRef} className="relative w-full" style={{ height: showLegend ? height + 28 : height }}>
+      {showLegend ? <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted" aria-label="Chart legend">{resolvedGroupKeys.map((key)=><span key={key.key} className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{backgroundColor:key._color}}/>{key.label??key.key}</span>)}</div> : null}
       <svg width={width} height={height} className="overflow-visible">
         <defs>
           {resolvedGroupKeys.map((k, i) => (
@@ -95,7 +116,7 @@ export function BarChart({
             <line x1={padL} x2={width - padR} y1={yScale(v)} y2={yScale(v)}
               stroke="rgb(var(--grid))" strokeDasharray="3 3" opacity={i === 0 ? 0.8 : 0.5} />
             <text x={padL - 8} y={yScale(v) + 4} textAnchor="end" fontSize="10.5" fill="rgb(var(--text-faint))">
-              {fmt(v)}
+              {formatAxisValue(v)}
             </text>
           </g>
         ))}
@@ -139,16 +160,19 @@ export function BarChart({
                 const y = yScale(v)
                 const x = cx - groupW / 2 + ki * barW
                 return (
-                  <rect key={k.key}
-                    x={x} y={y}
-                    width={barW - 2}
-                    height={Math.max(0, barH)}
-                    fill={`url(#${gradientId}-bar-grad-${ki})`}
-                    rx="3"
-                    onMouseEnter={() => setHover({ i, ki })}
-                    onMouseLeave={() => setHover(null)}
-                    style={{ transition: 'opacity 0.2s', opacity: hover && hover.i !== i ? 0.5 : 1 }}
-                  />
+                  <g key={k.key}>
+                    <rect
+                      x={x} y={y}
+                      width={barW - 2}
+                      height={Math.max(0, barH)}
+                      fill={`url(#${gradientId}-bar-grad-${ki})`}
+                      rx="3"
+                      onMouseEnter={() => setHover({ i, ki })}
+                      onMouseLeave={() => setHover(null)}
+                      style={{ transition: 'opacity 0.2s', opacity: hover && hover.i !== i ? 0.5 : 1 }}
+                    />
+                    {showValues ? <text x={x + (barW - 2) / 2} y={Math.max(12, y - 5)} textAnchor="middle" fontSize="10.5" fontWeight="600" fill="rgb(var(--text))">{formatValue(d[k.key])}</text> : null}
+                  </g>
                 )
               })}
               <text x={cx} y={height - 10} textAnchor="middle" fontSize="10.5" fill="rgb(var(--text-faint))">
@@ -169,9 +193,7 @@ export function BarChart({
             <div key={k.key} className="flex items-center gap-2">
               <span className="inline-block w-2 h-2 rounded-full" style={{ background: k._color }} />
               <span className="text-muted capitalize">{k.label || k.key}:</span>
-              <span className="font-mono">{tooltipValueFormat === 'integer'
-                ? (Number(data[hover!.i][k.key]) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })
-                : fmt(Number(data[hover!.i][k.key]) || 0)}</span>
+              <span className="font-mono">{formatValue(data[hover!.i][k.key] ?? 0)}</span>
             </div>
           ))}
         </div>

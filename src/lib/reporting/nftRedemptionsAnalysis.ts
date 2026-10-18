@@ -10,8 +10,13 @@ interface TopNftRow {
   token_id: string
 }
 
-function nftArtworkUrl(workspace: number, tokenAddress: string, tokenId: string): string {
+function nftArtworkUrl(workspace: number | 'all', tokenAddress: string, tokenId: string): string {
   const params = new URLSearchParams({ workspace: String(workspace), contract: tokenAddress, tokenId })
+  return `/api/reports/nft-redemptions/image?${params.toString()}`
+}
+
+function nftRegistryImageUrl(workspace: number | 'all', tokenAddress: string): string {
+  const params = new URLSearchParams({ workspace: String(workspace), contract: tokenAddress })
   return `/api/reports/nft-redemptions/image?${params.toString()}`
 }
 
@@ -23,15 +28,18 @@ function addressArray(values: string[]): Prisma.Sql {
 
 async function reportContext(workspace: number | 'all') {
   const workspaceWhere = workspace === 'all' ? {} : { workspaceId: workspace }
+  const nftWorkspaceWhere = workspace === 'all'
+    ? {}
+    : { OR: [{ workspaceId: workspace }, { aggregateAcrossWorkspaces: true }] }
   const addressWorkspaceWhere = workspace === 'all'
     ? {}
-    : { OR: [{ workspaceId: workspace }, { workspace: { name: 'SYSTEM' } }] }
+    : { OR: [{ workspaceId: workspace }, { workspace: { name: 'SYSTEM' } }, { role: 'MARKETPLACE', aggregateAcrossWorkspaces: true }] }
 
   const [config, nftContracts, kap20Contracts, addresses, allAddressContracts, allTokenContracts] = await Promise.all([
     getReportingConfig(),
     prisma.tokenContract.findMany({
-      where: { standard: 'KAP-721', active: true, ...workspaceWhere },
-      select: { id: true, normalizedAddress: true, symbol: true, name: true, imageKey: true },
+      where: { standard: 'KAP-721', active: true, ...nftWorkspaceWhere },
+      select: { id: true, workspaceId: true, normalizedAddress: true, symbol: true, name: true, imageKey: true },
       orderBy: { normalizedAddress: 'asc' },
     }),
     prisma.tokenContract.findMany({
@@ -40,17 +48,21 @@ async function reportContext(workspace: number | 'all') {
       orderBy: { normalizedAddress: 'asc' },
     }),
     prisma.addressContract.findMany({
-      where: { role: { in: ['ZERO', 'MARKETPLACE', 'MARKETPLACE_FEE'] }, ...addressWorkspaceWhere },
+      where: { role: { in: ['ZERO', 'MARKETPLACE', 'MARKETPLACE_FEE'] }, active: true, ...addressWorkspaceWhere },
       select: { role: true, normalizedAddress: true },
     }),
     prisma.addressContract.findMany({ select: { address: true } }),
     prisma.tokenContract.findMany({ select: { address: true } }),
   ])
 
+  const localNft = workspace === 'all' ? undefined : nftContracts.find((contract) => contract.workspaceId === workspace)
+  const displayNft = localNft ?? nftContracts[0]
+  const imageNft = (localNft?.imageKey ? localNft : undefined) ?? nftContracts.find((contract) => contract.imageKey)
+
   return {
     nftAddresses: nftContracts.map((contract) => contract.normalizedAddress),
-    nftSymbol: nftContracts[0]?.symbol ?? nftContracts[0]?.name ?? 'NFT',
-    nftImageUrl: nftContracts[0]?.imageKey ? `/api/contracts/token/${nftContracts[0].id}/image` : null,
+    nftSymbol: displayNft?.symbol ?? displayNft?.name ?? 'NFT',
+    nftImageUrl: imageNft ? nftRegistryImageUrl(workspace, imageNft.normalizedAddress) : null,
     kap20Addresses: kap20Contracts.map((contract) => contract.normalizedAddress),
     kap20Symbol: kap20Contracts[0]?.symbol ?? 'KAP-20',
     kap20ImageUrl: kap20Contracts[0]?.imageKey ? `/api/contracts/token/${kap20Contracts[0].id}/image` : null,
@@ -257,7 +269,7 @@ export async function getNftRedemptionTransactions(
       tokenName: item.tokenId ? nftNames.get(`${normalizeAddress(item.tokenAddress)}:${item.tokenId}`) ?? item.tokenName : item.tokenName,
       tokenSymbol: item.tokenSymbol,
       tokenId: item.tokenId,
-      imageUrl: item.tokenId ? nftArtworkUrl(workspace as number, item.tokenAddress, item.tokenId) : null,
+      imageUrl: item.tokenId ? nftArtworkUrl(workspace, item.tokenAddress, item.tokenId) : null,
       fromHash: item.fromHash,
       fromName: names.get(normalizeAddress(item.fromHash)) ?? null,
       toHash: item.toHash,

@@ -24,6 +24,17 @@ export function TopBar({ onToggleSidebar, currentPageLabel, admin }: TopBarProps
   const { selected, setSelected, workspaces } = useWorkspace()
   const [profileOpen, setProfileOpen] = useState(false)
   const [wsOpen, setWsOpen] = useState(false)
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
+  const [syncStatus, setSyncStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch('/api/system/latest-sync', { signal: controller.signal })
+      .then(async (response) => response.ok ? response.json() as Promise<{ finishedAt: string | null }> : Promise.reject(new Error('Unable to load sync status')))
+      .then((body) => { setLastSyncedAt(body.finishedAt); setSyncStatus('ready') })
+      .catch(() => setSyncStatus('unavailable'))
+    return () => controller.abort()
+  }, [])
 
   useEffect(() => {
     const onClick = () => {
@@ -59,6 +70,10 @@ export function TopBar({ onToggleSidebar, currentPageLabel, admin }: TopBarProps
         </div>
 
         <div className="flex min-w-0 shrink items-center gap-1 sm:gap-2">
+          <div className="max-w-[76px] whitespace-nowrap text-right text-[9px] leading-tight text-muted sm:max-w-none sm:text-[10px]" role="status" aria-live="polite" title={lastSyncedAt ? new Date(lastSyncedAt).toLocaleString('en-GB', { timeZone: 'Asia/Bangkok' }) : 'No completed sync'}>
+            <div className="hidden text-faint lg:block">Last synced</div>
+            <div className="font-medium text-default">{syncStatus === 'loading' ? 'Syncing…' : syncStatus === 'unavailable' ? 'Sync unavailable' : lastSyncedAt ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(lastSyncedAt)) : 'Not synced yet'}</div>
+          </div>
           {/* Workspace selector */}
           <div className="relative">
             <button

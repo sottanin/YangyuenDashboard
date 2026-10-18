@@ -1,0 +1,2 @@
+ALTER TABLE "TokenContract"
+ADD COLUMN "chartColor" TEXT NOT NULL DEFAULT '#8B5CF6';

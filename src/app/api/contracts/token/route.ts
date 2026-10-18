@@ -3,12 +3,13 @@ import { prisma } from '@/lib/prisma'
 import { authorizeSystemMutation } from '@/lib/system/authorization'
 import { parseTokenRegistryInput } from '@/lib/system/registry'
 import { isUniqueConstraintError } from '@/lib/system/databaseErrors'
-import { allowedWorkspaceIds, getCurrentAdmin } from '@/lib/auth/admin'
+import { allowedWorkspaceIds, canAccessMenu, getCurrentAdmin } from '@/lib/auth/admin'
 
 export async function GET(): Promise<NextResponse> {
   try {
     const admin = await getCurrentAdmin()
     if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!canAccessMenu(admin, 'contracts')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const workspaceIds = allowedWorkspaceIds(admin)
     const tokens = await prisma.tokenContract.findMany({
       where: workspaceIds === null ? undefined : { workspaceId: { in: workspaceIds } },
@@ -16,7 +17,7 @@ export async function GET(): Promise<NextResponse> {
       select: {
         id: true, name: true, address: true, normalizedAddress: true, symbol: true, standard: true,
         decimals: true, role: true, active: true, effectiveFrom: true, effectiveTo: true, workspaceId: true,
-        imageKey: true, workspace: { select: { id: true, name: true } },
+        imageKey: true, chartColor: true, aggregateAcrossWorkspaces: true, workspace: { select: { id: true, name: true } },
       },
     })
     return NextResponse.json(tokens.map(({ imageKey, ...token }) => ({ ...token, imageUrl: imageKey ? `/api/contracts/token/${token.id}/image` : null })))

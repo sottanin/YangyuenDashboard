@@ -68,7 +68,9 @@ export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', aria
 
   const height = Math.max(250, data.length * 31 + 26)
   const left = width < 440 ? 112 : 146
-  const right = width < 440 ? 62 : 86
+  const visibleValueLabels = data.map((point) => `${formatExactAmount(point.amount)} ${symbol}`)
+  const longestValueLabel = visibleValueLabels.reduce((longest, label) => Math.max(longest, label.length), 0)
+  const right = Math.min(width < 440 ? 132 : 190, Math.max(width < 440 ? 76 : 96, longestValueLabel * 6.5 + 18))
   const top = 10
   const rowHeight = (height - top - 10) / Math.max(1, data.length)
   const innerWidth = Math.max(1, width - left - right)
@@ -103,7 +105,7 @@ export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', aria
           </a>
           <rect x={left} y={y} width={innerWidth} height={barHeight} rx="5" fill="rgb(var(--grid))" opacity="0.28" />
           <rect x={left} y={y} width={Math.max(2, barWidth)} height={barHeight} rx="5" fill={`url(#${gradientId})`} opacity={hovered !== null && hovered !== index ? 0.48 : 1} />
-          <text x={width - right + 8} y={y + barHeight / 2 + 4} fontSize="10.5" fill="rgb(var(--text))">{formatExactAmount(point.amount)}</text>
+          <text x={width - 4} y={y + barHeight / 2 + 4} textAnchor="end" fontSize="10.5" fill="rgb(var(--text))">{visibleValueLabels[index]}</text>
         </g>
       })}
     </svg>

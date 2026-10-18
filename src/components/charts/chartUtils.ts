@@ -37,3 +37,18 @@ export function fmt(n: number): string {
   if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'K'
   return Math.round(n).toString()
 }
+
+export function formatDecimalAmount(value: string | number): string {
+  const raw = String(value).trim()
+  const match = raw.match(/^([+-]?)(\d+)(?:\.(\d+))?$/)
+  if (!match) {
+    const numeric = Number(raw)
+    return Number.isFinite(numeric)
+      ? numeric.toLocaleString('en-US', { maximumFractionDigits: 18 })
+      : raw
+  }
+  const [, sign, integer, fraction = ''] = match
+  const groupedInteger = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  const trimmedFraction = fraction.replace(/0+$/, '')
+  return `${sign}${groupedInteger}${trimmedFraction ? `.${trimmedFraction}` : ''}`
+}

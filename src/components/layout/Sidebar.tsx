@@ -33,7 +33,7 @@ export function Sidebar({ state, admin }: SidebarProps) {
   }
 
   const visibleMenus = MENU_CATALOG.filter((menu) => admin.menuKeys.includes('*') || admin.menuKeys.includes(menu.key))
-  const sections = ['Workspace', 'Blockchain', 'System'].map((section) => ({ section, items: visibleMenus.filter((menu) => menu.section === section) })).filter((section) => section.items.length > 0)
+  const sections = ['Workspace', 'System'].map((section) => ({ section, items: visibleMenus.filter((menu) => menu.section === section) })).filter((section) => section.items.length > 0)
 
   useEffect(() => {
     if (!profileOpen) return

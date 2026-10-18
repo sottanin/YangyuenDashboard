@@ -41,7 +41,7 @@ export async function DELETE(_req: NextRequest, { params }: RouteContext): Promi
   const record = await prisma.tokenContract.findUnique({ where: { id }, include: { workspace: { select: { name: true } } } })
   if (!record) return NextResponse.json({ error: 'Token not found' }, { status: 404 })
   if (record.workspace.name === 'SYSTEM' || await isTokenAddressUsed(record.normalizedAddress)) {
-    const updated = await prisma.tokenContract.update({ where: { id }, data: { active: false, effectiveTo: new Date() } })
+    const updated = await prisma.tokenContract.update({ where: { id }, data: { active: false, aggregateAcrossWorkspaces: false, effectiveTo: new Date() } })
     return NextResponse.json({ success: true, deactivated: true, record: updated })
   }
   await prisma.tokenContract.delete({ where: { id } })

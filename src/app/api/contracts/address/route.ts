@@ -4,12 +4,13 @@ import { authorizeSystemMutation } from '@/lib/system/authorization'
 import { normalizeAddress, SYSTEM_ADDRESSES } from '@/lib/system/addresses'
 import { parseAddressRegistryInput } from '@/lib/system/registry'
 import { isUniqueConstraintError } from '@/lib/system/databaseErrors'
-import { allowedWorkspaceIds, getCurrentAdmin } from '@/lib/auth/admin'
+import { allowedWorkspaceIds, canAccessMenu, getCurrentAdmin } from '@/lib/auth/admin'
 
 export async function GET(): Promise<NextResponse> {
   try {
     const admin = await getCurrentAdmin()
     if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!canAccessMenu(admin, 'contracts')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const workspaceIds = allowedWorkspaceIds(admin)
     const addresses = await prisma.addressContract.findMany({
       where: workspaceIds === null ? undefined : { workspaceId: { in: workspaceIds } },

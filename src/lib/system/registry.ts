@@ -1,4 +1,5 @@
 import { normalizeAddress, isValidAddress } from './addresses'
+import { DEFAULT_TOKEN_CHART_COLOR, isTokenChartColor, type TokenChartColor } from '@/lib/tokenChartColors'
 
 export const TOKEN_ROLES = ['PRIMARY_TOKEN', 'POINT_TOKEN', 'REDEMPTION_NFT', 'OTHER'] as const
 export const TOKEN_STANDARDS = ['KAP-20', 'KAP-22', 'KAP-721'] as const
@@ -18,6 +19,8 @@ export interface TokenRegistryInput {
   role: TokenRole
   active: boolean
   workspaceId: number
+  chartColor: TokenChartColor
+  aggregateAcrossWorkspaces: boolean
 }
 
 export interface AddressRegistryInput {
@@ -28,6 +31,7 @@ export interface AddressRegistryInput {
   version: string | null
   active: boolean
   workspaceId: number | null
+  aggregateAcrossWorkspaces: boolean
 }
 
 function parseWorkspaceId(value: unknown): number | null | undefined {
@@ -52,6 +56,8 @@ export function parseTokenRegistryInput(input: unknown): { data?: TokenRegistryI
   const role = body.role
   const workspaceId = parseWorkspaceId(body.workspaceId)
   const active = body.active === undefined ? true : body.active
+  const chartColor = body.chartColor === undefined ? DEFAULT_TOKEN_CHART_COLOR : body.chartColor
+  const aggregateAcrossWorkspaces = body.aggregateAcrossWorkspaces === true
   if (!name) return { error: 'Name is required and must be at most 100 characters' }
   if (!isValidAddress(address)) return { error: 'Address must contain 0x followed by 40 hexadecimal characters' }
   if (typeof standard !== 'string' || !TOKEN_STANDARDS.includes(standard as TokenStandard)) return { error: 'Token standard is invalid' }
@@ -59,6 +65,7 @@ export function parseTokenRegistryInput(input: unknown): { data?: TokenRegistryI
   if (!symbol) return { error: 'Symbol is required' }
   if (workspaceId === undefined || workspaceId === null) return { error: 'Workspace is required' }
   if (typeof active !== 'boolean') return { error: 'Active must be a boolean' }
+  if (!isTokenChartColor(chartColor)) return { error: 'Chart color is invalid' }
   let decimals: number | null = null
   if (standard !== 'KAP-721') {
     if (typeof body.decimals !== 'number' || !Number.isInteger(body.decimals) || body.decimals < 0 || body.decimals > 36) {
@@ -66,7 +73,7 @@ export function parseTokenRegistryInput(input: unknown): { data?: TokenRegistryI
     }
     decimals = body.decimals
   }
-  return { data: { name, address, normalizedAddress: normalizeAddress(address), symbol, standard: standard as TokenStandard, decimals, role: role as TokenRole, active, workspaceId } }
+  return { data: { name, address, normalizedAddress: normalizeAddress(address), symbol, standard: standard as TokenStandard, decimals, role: role as TokenRole, active, workspaceId, chartColor, aggregateAcrossWorkspaces: standard === 'KAP-721' && active ? aggregateAcrossWorkspaces : false } }
 }
 
 export function parseAddressRegistryInput(input: unknown): { data?: AddressRegistryInput; error?: string } {
@@ -79,6 +86,7 @@ export function parseAddressRegistryInput(input: unknown): { data?: AddressRegis
   const version = rawVersion || null
   const workspaceId = parseWorkspaceId(body.workspaceId)
   const active = body.active === undefined ? true : body.active
+  const aggregateAcrossWorkspaces = body.aggregateAcrossWorkspaces === true
   if (!name) return { error: 'Display name is required and must be at most 100 characters' }
   if (rawVersion === undefined) return { error: 'Version must be at most 30 characters' }
   if (!isValidAddress(address)) return { error: 'Address must contain 0x followed by 40 hexadecimal characters' }
@@ -86,5 +94,5 @@ export function parseAddressRegistryInput(input: unknown): { data?: AddressRegis
   if (role === 'MARKETPLACE' && !version) return { error: 'Version is required for a marketplace address' }
   if (workspaceId === undefined) return { error: 'Workspace is invalid' }
   if (typeof active !== 'boolean') return { error: 'Active must be a boolean' }
-  return { data: { name, address, normalizedAddress: normalizeAddress(address), role: role as AddressRole, version, active, workspaceId } }
+  return { data: { name, address, normalizedAddress: normalizeAddress(address), role: role as AddressRole, version, active, workspaceId, aggregateAcrossWorkspaces: role === 'MARKETPLACE' && active ? aggregateAcrossWorkspaces : false } }
 }

@@ -15,18 +15,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!canAccessWorkspace(admin, workspace)) return new NextResponse(null, { status: 403 })
   const contract = request.nextUrl.searchParams.get('contract')?.trim() ?? ''
   const tokenId = request.nextUrl.searchParams.get('tokenId')?.trim() ?? ''
-  if (!/^0x[0-9a-fA-F]{40}$/.test(contract) || !tokenId || tokenId.length > 256) return new NextResponse(null, { status: 400 })
+  if (!/^0x[0-9a-fA-F]{40}$/.test(contract) || tokenId.length > 256) return new NextResponse(null, { status: 400 })
 
   const normalizedTokenAddress = normalizeAddress(contract)
   const registry = await prisma.tokenContract.findFirst({
-    where: { normalizedAddress: normalizedTokenAddress, workspaceId: workspace, standard: 'KAP-721' },
+    where: { normalizedAddress: normalizedTokenAddress, standard: 'KAP-721', active: true, OR: [{ workspaceId: workspace }, { aggregateAcrossWorkspaces: true }] },
     select: { imageKey: true },
   })
   if (!registry) return new NextResponse(null, { status: 404 })
-  const instance = await prisma.nFTInstance.findUnique({
-    where: { normalizedTokenAddress_id: { normalizedTokenAddress, id: tokenId } },
-    select: { imageUrl: true },
-  })
+  const instance = tokenId
+    ? await prisma.nFTInstance.findUnique({
+        where: { normalizedTokenAddress_id: { normalizedTokenAddress, id: tokenId } },
+        select: { imageUrl: true },
+      })
+    : null
   if (instance?.imageUrl) {
     const remote = await fetchRemoteImage(instance.imageUrl)
     if (remote) return new NextResponse(Uint8Array.from(remote.bytes).buffer, { headers: { 'Content-Type': remote.contentType, 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff' } })
