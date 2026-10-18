@@ -1,44 +1,12 @@
 import 'dotenv/config'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { PrismaClient, Prisma } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import path from 'path'
+import { parseBigInt, parseDate, parseDecimal, parseInt2, parseStr, worksheetToRows } from './seedWorkbook'
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! })
 const prisma = new PrismaClient({ adapter })
-
-function parseDecimal(v: unknown): Prisma.Decimal {
-  if (v === null || v === undefined || v === '') return new Prisma.Decimal(0)
-  const n = Number(v)
-  if (isNaN(n)) return new Prisma.Decimal(0)
-  return new Prisma.Decimal(n)
-}
-
-function parseDate(v: unknown): Date {
-  if (!v) return new Date(0)
-  if (typeof v === 'number') {
-    const d = XLSX.SSF.parse_date_code(v)
-    if (d) return new Date(Date.UTC(d.y, d.m - 1, d.d, d.H || 0, d.M || 0, d.S || 0))
-  }
-  const parsed = new Date(String(v))
-  return isNaN(parsed.getTime()) ? new Date(0) : parsed
-}
-
-function parseStr(v: unknown): string {
-  if (v === null || v === undefined) return ''
-  return String(v).trim()
-}
-
-function parseInt2(v: unknown): number | null {
-  if (v === null || v === undefined || v === '') return null
-  const n = parseInt(String(v), 10)
-  return isNaN(n) ? null : n
-}
-
-function parseBigInt(v: unknown): bigint | null {
-  if (v === null || v === undefined || v === '') return null
-  try { return BigInt(Math.round(Number(v))) } catch { return null }
-}
 
 async function runBatch<T>(promises: (Promise<T> | null)[]): Promise<void> {
   const filtered = promises.filter((p): p is Promise<T> => p !== null)
@@ -55,9 +23,10 @@ async function main() {
 
   // ─── Transactions.xlsx ───────────────────────────────────────────────────
   const txPath = path.join(process.cwd(), 'Transactions.xlsx')
-  const txWb = XLSX.readFile(txPath, { cellDates: false })
+  const txWb = new ExcelJS.Workbook()
+  await txWb.xlsx.readFile(txPath)
 
-  const txHeaders = XLSX.utils.sheet_to_json<Record<string, unknown>>(txWb.Sheets['Transaction Header'])
+  const txHeaders = worksheetToRows(txWb.getWorksheet('Transaction Header'))
   const headerMap = new Map<string, Record<string, unknown>>()
   for (const h of txHeaders) {
     const id = parseStr(h['tx_id'])
@@ -88,7 +57,7 @@ async function main() {
   console.log(`\nInserted ${headerMap.size} transaction headers`)
 
   // Pass 2: Upsert TransactionDetail (one per log event / key)
-  const txDetails = XLSX.utils.sheet_to_json<Record<string, unknown>>(txWb.Sheets['Transaction Detail'])
+  const txDetails = worksheetToRows(txWb.getWorksheet('Transaction Detail'))
   console.log(`Processing ${txDetails.length} transaction detail rows...`)
 
   let inserted = 0
@@ -131,9 +100,9 @@ async function main() {
   console.log(`\nInserted ${inserted} transaction details (skipped ${skipped})`)
 
   // Wallets
-  const walletSheet = txWb.Sheets['Wallet']
+  const walletSheet = txWb.getWorksheet('Wallet')
   if (walletSheet) {
-    const wallets = XLSX.utils.sheet_to_json<Record<string, unknown>>(walletSheet)
+    const wallets = worksheetToRows(walletSheet)
     console.log(`Processing ${wallets.length} wallet rows...`)
     let wInserted = 0
     for (let i = 0; i < wallets.length; i += BATCH) {
@@ -169,9 +138,9 @@ async function main() {
   }
 
   // Token contracts
-  const tokenSheet = txWb.Sheets['Token Contract']
+  const tokenSheet = txWb.getWorksheet('Token Contract')
   if (tokenSheet) {
-    const tokens = XLSX.utils.sheet_to_json<Record<string, unknown>>(tokenSheet)
+    const tokens = worksheetToRows(tokenSheet)
     for (const t of tokens) {
       const name = parseStr(t['Token Name'])
       const address = parseStr(t['Contract Address'])
@@ -186,9 +155,9 @@ async function main() {
   }
 
   // Address contracts
-  const addrSheet = txWb.Sheets['Address Contract']
+  const addrSheet = txWb.getWorksheet('Address Contract')
   if (addrSheet) {
-    const addrs = XLSX.utils.sheet_to_json<Record<string, unknown>>(addrSheet)
+    const addrs = worksheetToRows(addrSheet)
     for (const a of addrs) {
       const name = parseStr(a['Contract Name'])
       const address = parseStr(a['Contract Address'])
@@ -204,9 +173,10 @@ async function main() {
 
   // ─── Redemption Transactions.xlsx ───────────────────────────────────────
   const rdmPath = path.join(process.cwd(), 'Redemption Transactions.xlsx')
-  const rdmWb = XLSX.readFile(rdmPath, { cellDates: false })
+  const rdmWb = new ExcelJS.Workbook()
+  await rdmWb.xlsx.readFile(rdmPath)
 
-  const rdmHeaders = XLSX.utils.sheet_to_json<Record<string, unknown>>(rdmWb.Sheets['Transaction Header'])
+  const rdmHeaders = worksheetToRows(rdmWb.getWorksheet('Transaction Header'))
   const rdmHeaderMap = new Map<string, Record<string, unknown>>()
   for (const h of rdmHeaders) {
     const id = parseStr(h['tx_id'])
@@ -236,7 +206,7 @@ async function main() {
   console.log(`\nInserted ${rdmHeaderMap.size} redemption transaction headers`)
 
   // Pass 2: Upsert RedemptionTransactionDetail (one per log event / key)
-  const rdmDetails = XLSX.utils.sheet_to_json<Record<string, unknown>>(rdmWb.Sheets['Transaction Detail'])
+  const rdmDetails = worksheetToRows(rdmWb.getWorksheet('Transaction Detail'))
   console.log(`Processing ${rdmDetails.length} redemption detail rows...`)
 
   let rdmInserted = 0
@@ -275,9 +245,9 @@ async function main() {
   console.log(`\nInserted ${rdmInserted} redemption details (skipped ${rdmSkipped})`)
 
   // NFT Instances
-  const instanceSheet = rdmWb.Sheets['Instances']
+  const instanceSheet = rdmWb.getWorksheet('Instances')
   if (instanceSheet) {
-    const instances = XLSX.utils.sheet_to_json<Record<string, unknown>>(instanceSheet)
+    const instances = worksheetToRows(instanceSheet)
     console.log(`Processing ${instances.length} NFT instances...`)
     for (const inst of instances) {
       const id = parseStr(inst['id'])
