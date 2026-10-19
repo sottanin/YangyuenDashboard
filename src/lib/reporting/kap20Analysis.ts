@@ -7,7 +7,7 @@ import { walletBalanceColumnForTokenAddress, walletBalanceFieldForTokenAddress }
 import { getWorkspaceReportScope } from './workspaceScope'
 import { reportingDaySql } from './reportingDay'
 
-interface AggregateRow { mint: Prisma.Decimal | null; backup_balance: Prisma.Decimal | null; workspace_balance: Prisma.Decimal | null; user_balance: Prisma.Decimal | null; user_transaction_balance: Prisma.Decimal | null; redemption: Prisma.Decimal | null }
+interface AggregateRow { mint: Prisma.Decimal | null; backup_balance: Prisma.Decimal | null; workspace_balance: Prisma.Decimal | null; user_balance: Prisma.Decimal | null; user_transaction_balance: Prisma.Decimal | null; redemption_gross: Prisma.Decimal | null; redemption_fee: Prisma.Decimal | null }
 interface DailyRow { day: Date | string; total_transactions: bigint; total_amount: Prisma.Decimal | null }
 interface TopRow { wallet_address: string; amount: Prisma.Decimal }
 interface WalletBalanceRow { normalized_address: string; balance: Prisma.Decimal | null }
@@ -31,7 +31,7 @@ async function context(workspace: number | 'all') {
       select: { id: true, name: true, symbol: true, address: true, imageKey: true },
       orderBy: [{ workspaceId: 'asc' }, { name: 'asc' }],
     }),
-    prisma.addressContract.findMany({ where: { role: { in: ['ZERO', 'INITIAL_MINT', 'MAIN', 'WORKSPACE', 'LOYALTY_SWAP', 'MARKETPLACE'] }, ...(workspace === 'all' ? {} : { OR: [{ workspaceId: workspace }, { workspace: { name: 'SYSTEM' } }] }) }, select: { role: true, normalizedAddress: true } }),
+    prisma.addressContract.findMany({ where: { active: true, role: { in: ['ZERO', 'INITIAL_MINT', 'MAIN', 'WORKSPACE', 'LOYALTY_SWAP', 'MARKETPLACE', 'MARKETPLACE_FEE'] }, ...(workspace === 'all' ? {} : { OR: [{ workspaceId: workspace }, { workspace: { name: 'SYSTEM' } }, { role: 'MARKETPLACE', aggregateAcrossWorkspaces: true }] }) }, select: { role: true, normalizedAddress: true } }),
   ])
   if (!token || !walletBalanceFieldForTokenAddress(token.address)) return null
   const configuredHistoryStart = new Date(config.businessHistoryStart)
@@ -80,7 +80,7 @@ async function context(workspace: number | 'all') {
     select: { id: true, name: true, symbol: true, address: true, normalizedAddress: true, imageKey: true, active: true },
     orderBy: [{ name: 'asc' }, { normalizedAddress: 'asc' }],
   })
-  return { scope, historyStart, timezone: config.reportingTimezone, token: { id: token.id, name: token.name, symbol: token.symbol ?? token.name, address: token.address, imageUrl: token.imageKey ? `/api/contracts/token/${token.id}/image` : null }, zero: zeroWallets, initialMintWallets, main: mainWallets, workspaceWallets, loyaltySwaps: addresses.filter((row) => row.role === 'LOYALTY_SWAP').map((row) => row.normalizedAddress), marketplaces: addresses.filter((row) => row.role === 'MARKETPLACE').map((row) => row.normalizedAddress), pointContracts }
+  return { scope, historyStart, timezone: config.reportingTimezone, token: { id: token.id, name: token.name, symbol: token.symbol ?? token.name, address: token.address, imageUrl: token.imageKey ? `/api/contracts/token/${token.id}/image` : null }, zero: zeroWallets, initialMintWallets, main: mainWallets, workspaceWallets, loyaltySwaps: addresses.filter((row) => row.role === 'LOYALTY_SWAP').map((row) => row.normalizedAddress), marketplaces: addresses.filter((row) => row.role === 'MARKETPLACE').map((row) => row.normalizedAddress), marketplaceFees: addresses.filter((row) => row.role === 'MARKETPLACE_FEE').map((row) => row.normalizedAddress), pointContracts }
 }
 
 export async function listKap20Tokens(workspace: number | 'all') {
@@ -91,7 +91,7 @@ export async function listKap20Tokens(workspace: number | 'all') {
 export async function getKap20Summary(tokenAddress: string, workspace: number | 'all') {
   const value = await context(workspace)
   if (!value || normalizeAddress(tokenAddress) !== normalizeAddress(value.token.address)) return null
-  const zero = addressArray(value.zero); const main = addressArray(value.main); const workspaceWalletAddresses = addressArray(value.workspaceWallets); const incomingWallets = addressArray([...value.initialMintWallets, ...value.workspaceWallets]); const outgoingTargets = addressArray([...value.loyaltySwaps, ...value.workspaceWallets]); const marketplace = addressArray(value.marketplaces); const pointContractAddresses = value.pointContracts.map((contract) => contract.normalizedAddress); const pointContracts = addressArray(pointContractAddresses)
+  const zero = addressArray(value.zero); const main = addressArray(value.main); const workspaceWalletAddresses = addressArray(value.workspaceWallets); const incomingWallets = addressArray([...value.initialMintWallets, ...value.workspaceWallets]); const outgoingTargets = addressArray([...value.loyaltySwaps, ...value.workspaceWallets]); const marketplace = addressArray(value.marketplaces); const marketplaceFees = addressArray(value.marketplaceFees); const pointContractAddresses = value.pointContracts.map((contract) => contract.normalizedAddress); const pointContracts = addressArray(pointContractAddresses)
   const token = normalizeAddress(value.token.address)
   const balanceColumn = walletBalanceColumnForTokenAddress(token)
   const reportingDay = reportingDaySql(Prisma.raw('"timestamp"'), value.timezone)
@@ -114,7 +114,8 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
             AND EXISTS (SELECT 1 FROM events evidence WHERE LOWER(evidence."fromHash") = snapshot.normalized_address OR LOWER(evidence."toHash") = snapshot.normalized_address)) user_balance,
         COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(events."toHash")) THEN "value" ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(events."fromHash")) THEN "value" ELSE 0 END), 0) user_transaction_balance,
-        COALESCE(SUM(CASE WHEN LOWER("toHash") = ANY(${marketplace}) AND NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(events."fromHash")) THEN "value" ELSE 0 END), 0) redemption
+        COALESCE(SUM(CASE WHEN LOWER("toHash") = ANY(${marketplace}) AND NOT EXISTS (SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(events."fromHash")) THEN "value" ELSE 0 END), 0) redemption_gross,
+        COALESCE(SUM(CASE WHEN LOWER("fromHash") = ANY(${marketplace}) AND LOWER("toHash") = ANY(${marketplaceFees}) THEN "value" ELSE 0 END), 0) redemption_fee
       FROM events
     `),
     prisma.$queryRaw<DailyRow[]>(Prisma.sql`
@@ -184,6 +185,10 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
     incomingTransfers: performance.get(contract.normalizedAddress)?.incoming ?? '0',
     outgoingTransfers: performance.get(contract.normalizedAddress)?.outgoing ?? '0',
   }))
+  const redemptionFee = new Prisma.Decimal(amount(total?.redemption_fee))
+  const redemptionBurn = Prisma.Decimal.max(new Prisma.Decimal(0), new Prisma.Decimal(amount(total?.redemption_gross)).sub(redemptionFee))
+  const accounted = new Prisma.Decimal(amount(total?.backup_balance)).add(workspaceWallet).add(distributorPool).add(userWallet).add(redemptionBurn).add(redemptionFee)
+  const reconciliationDelta = new Prisma.Decimal(amount(total?.mint)).sub(accounted)
   return {
     token: value.token,
     mint: amount(total?.mint),
@@ -191,9 +196,10 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
     workspaceWallet,
     distributorPool,
     userWallet,
-    redemptionBurn: amount(total?.redemption),
+    redemptionBurn: redemptionBurn.toString(),
+    redemptionFee: redemptionFee.toString(),
     pointTokenLocks,
-    reconciliationDelta: '0', reconciliationMatched: true,
+    reconciliationDelta: reconciliationDelta.toString(), reconciliationMatched: reconciliationDelta.isZero(),
     daily: days.map((day) => ({ date: day.day instanceof Date ? day.day.toISOString().slice(0, 10) : String(day.day).slice(0, 10), totalTransactions: Number(day.total_transactions), totalAmount: amount(day.total_amount) })), timezone: value.timezone, historyStart: value.historyStart.toISOString(),
   }
 }

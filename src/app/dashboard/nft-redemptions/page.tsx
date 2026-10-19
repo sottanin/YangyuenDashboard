@@ -23,6 +23,7 @@ interface TransactionRow {
   tokenName: string
   tokenSymbol: string
   tokenId: string | null
+  tokenValue: string | null
   imageUrl: string | null
   fromHash: string
   fromName: string | null
@@ -177,7 +178,7 @@ export default function NftRedemptionsPage(): React.JSX.Element {
       {tableError ? <div className="p-5"><ErrorCard message={tableError} onRetry={() => void loadTransactions(page, search)} /></div> : tableLoading || !transactions ? <div className="p-5"><SkeletonTable rows={7} /></div> : transactions.rows.length === 0 ? <div className="py-16 text-center"><div className="text-sm font-medium text-default">No NFT transactions found</div><p className="mt-1 text-xs text-muted">{search ? `No results match “${search}”.` : 'Run NFT Redemption Sync to populate this report.'}</p></div> : <>
         <div className="w-full min-w-0 overflow-x-auto thin-scroll" tabIndex={0} role="region" aria-label="Scrollable NFT redemption transaction table"><table className="min-w-[1080px] w-full text-sm">
           <caption className="sr-only">NFT redemption transaction events</caption>
-          <thead><tr className="border-b border-default text-[10.5px] uppercase tracking-wider text-faint"><th scope="col" className="px-5 py-3 text-left font-medium">Transaction</th><th scope="col" className="px-3 py-3 text-left font-medium">Type</th><th scope="col" className="px-3 py-3 text-left font-medium">From</th><th scope="col" className="px-3 py-3 text-left font-medium">To</th><th scope="col" className="px-3 py-3 text-left font-medium">NFT</th><th scope="col" className="px-3 py-3 text-left font-medium">Token ID</th><th scope="col" className="px-3 py-3 text-right font-medium">Amount</th><th scope="col" className="px-3 py-3 text-left font-medium">Time</th><th scope="col" className="px-3 py-3 text-left font-medium">Status</th></tr></thead>
+          <thead><tr className="border-b border-default text-[10.5px] uppercase tracking-wider text-faint"><th scope="col" className="px-5 py-3 text-left font-medium">Transaction</th><th scope="col" className="px-3 py-3 text-left font-medium">Type</th><th scope="col" className="px-3 py-3 text-left font-medium">From</th><th scope="col" className="px-3 py-3 text-left font-medium">To</th><th scope="col" className="px-3 py-3 text-left font-medium">NFT</th><th scope="col" className="px-3 py-3 text-left font-medium">Token ID</th><th scope="col" className="px-3 py-3 text-right font-medium">Token Value</th><th scope="col" className="px-3 py-3 text-right font-medium">Amount</th><th scope="col" className="px-3 py-3 text-left font-medium">Time</th><th scope="col" className="px-3 py-3 text-left font-medium">Status</th></tr></thead>
           <tbody>{transactions.rows.map((row) => <tr key={row.id} className="tbl-row border-b border-default last:border-0">
             <td className="px-5 py-3"><a href={`https://www.kubscan.com/tx/${encodeURIComponent(row.txId)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-mono text-xs text-default hover:text-accent" title={row.txId}>{compactAddress(row.txId)}<Icon name="external" size={12} /></a></td>
             <td className="px-3 py-3"><span className={`pill ${row.type === 'Mint' ? 'pill-success' : row.type === 'Burn' ? 'pill-danger' : 'pill-muted'}`}>{row.type}</span></td>
@@ -185,6 +186,7 @@ export default function NftRedemptionsPage(): React.JSX.Element {
             <td className="px-3 py-3"><AddressLink address={row.toHash} name={row.toName} /></td>
             <td className="max-w-56 px-3 py-3 text-xs text-default"><div className="flex items-center gap-2"><TokenAvatar src={row.imageUrl} symbol={row.tokenSymbol || row.tokenName} size="md" className="h-7 w-7 rounded-lg" /><div className="min-w-0"><div className="truncate rounded font-medium focus:outline-none focus:ring-2 focus:ring-[rgb(var(--accent))]" title={row.tokenName} aria-label={row.tokenName} tabIndex={0}>{row.tokenName}</div><div className="truncate text-[10px] text-muted" title={row.tokenSymbol}>{row.tokenSymbol}</div></div></div></td>
             <td className="px-3 py-3 font-mono text-xs text-default">{row.tokenId ?? '—'}</td>
+            <td className="px-3 py-3 text-right font-mono text-xs text-default">{row.tokenValue ?? '—'}</td>
             <td className="px-3 py-3 text-right font-mono text-xs text-default">1 NFT</td>
             <td className="whitespace-nowrap px-3 py-3 text-xs text-muted"><time dateTime={row.timestamp} title={row.timestamp}>{formatTimestamp(row.timestamp, summary?.timezone ?? 'Asia/Bangkok')}</time></td>
             <td className="px-3 py-3"><span className={`pill ${['ok', 'success'].includes((row.status ?? '').toLowerCase()) ? 'pill-success' : 'pill-muted'}`}>{row.status ?? 'Unknown'}</span></td>

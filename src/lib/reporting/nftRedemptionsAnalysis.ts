@@ -116,13 +116,20 @@ export async function getNftRedemptionsSummary(workspace: number | 'all') {
     }),
   ])
 
+  const grossKap20Burn = kap20Burn._sum.value ?? new Prisma.Decimal(0)
+  const totalKap20Fee = kap20Fee._sum.value ?? new Prisma.Decimal(0)
+  const netKap20Burn = Prisma.Decimal.max(
+    new Prisma.Decimal(0),
+    grossKap20Burn.sub(totalKap20Fee),
+  )
+
   return {
     nftMint,
     nftBurn,
     nftSymbol: context.nftSymbol,
     nftImageUrl: context.nftImageUrl,
-    kap20Burn: kap20Burn._sum.value?.toString() ?? '0',
-    kap20Fee: kap20Fee._sum.value?.toString() ?? '0',
+    kap20Burn: netKap20Burn.toString(),
+    kap20Fee: totalKap20Fee.toString(),
     kap20Symbol: context.kap20Symbol,
     kap20ImageUrl: context.kap20ImageUrl,
     timezone: context.timezone,
@@ -254,9 +261,10 @@ export async function getNftRedemptionTransactions(
   const tokenIds = Array.from(new Set(items.flatMap((item) => item.tokenId ? [item.tokenId] : [])))
   const nftInstances = tokenIds.length === 0 ? [] : await prisma.nFTInstance.findMany({
     where: { normalizedTokenAddress: { in: context.nftAddresses }, id: { in: tokenIds } },
-    select: { normalizedTokenAddress: true, id: true, name: true },
+    select: { normalizedTokenAddress: true, id: true, name: true, tokenValue: true },
   })
   const nftNames = new Map(nftInstances.map((instance) => [`${instance.normalizedTokenAddress}:${instance.id}`, instance.name]))
+  const nftValues = new Map(nftInstances.map((instance) => [`${instance.normalizedTokenAddress}:${instance.id}`, instance.tokenValue?.toString() ?? null]))
   const zero = new Set(context.zeroAddresses)
 
   return {
@@ -269,6 +277,7 @@ export async function getNftRedemptionTransactions(
       tokenName: item.tokenId ? nftNames.get(`${normalizeAddress(item.tokenAddress)}:${item.tokenId}`) ?? item.tokenName : item.tokenName,
       tokenSymbol: item.tokenSymbol,
       tokenId: item.tokenId,
+      tokenValue: item.tokenId ? nftValues.get(`${normalizeAddress(item.tokenAddress)}:${item.tokenId}`) ?? null : null,
       imageUrl: item.tokenId ? nftArtworkUrl(workspace, item.tokenAddress, item.tokenId) : null,
       fromHash: item.fromHash,
       fromName: names.get(normalizeAddress(item.fromHash)) ?? null,

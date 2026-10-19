@@ -11,6 +11,16 @@ export const TOKEN_CHART_COLORS = [
   { value: '#F97316', label: 'Orange' },
   { value: '#F43F5E', label: 'Rose' },
   { value: '#EC4899', label: 'Pink' },
+  { value: '#A3FF12', label: 'Neon Chartreuse' },
+  { value: '#39FF14', label: 'Neon Green' },
+  { value: '#00FFD5', label: 'Neon Aqua' },
+  { value: '#00E5FF', label: 'Neon Cyan' },
+  { value: '#2979FF', label: 'Neon Blue' },
+  { value: '#7C4DFF', label: 'Neon Purple' },
+  { value: '#D500F9', label: 'Neon Magenta' },
+  { value: '#FF1744', label: 'Neon Red' },
+  { value: '#FF6D00', label: 'Neon Orange' },
+  { value: '#FFEA00', label: 'Neon Yellow' },
 ] as const
 
 export type TokenChartColor = typeof TOKEN_CHART_COLORS[number]['value']

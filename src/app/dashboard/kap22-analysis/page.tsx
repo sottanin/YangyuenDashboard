@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { usePathname } from 'next/navigation'
 import { Card } from '@/components/ui/Card'
 import { ErrorCard } from '@/components/ui/ErrorCard'
 import { Icon } from '@/components/ui/Icon'
@@ -37,6 +38,7 @@ interface SummaryResponse {
   workspaceWallet?: string
   userWallet?: string
   redemptionBurn?: string
+  redemptionFee?: string
   pointTokenLocks?: PointTokenLock[]
 }
 type TransactionType = 'Mint' | 'Burn' | 'Transfer'
@@ -76,8 +78,9 @@ async function responseJson<T>(response: Response): Promise<T> {
   return body as T
 }
 
-export interface TokenAnalysisPageProps { reportType?: 'kap20' | 'kap22' }
-export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysisPageProps) {
+export default function Kap22AnalysisPage() {
+  const pathname = usePathname()
+  const reportType = pathname === '/dashboard/tokens' || pathname === '/dashboard/kap20-analysis' ? 'kap20' : 'kap22'
   const isKap20 = reportType === 'kap20'
   const reportLabel = isKap20 ? 'KAP-20' : 'KAP-22'
   const reportTitle = isKap20 ? 'Tokens (KAP-20)' : 'Point Tokens (KAP-22)'
@@ -91,10 +94,11 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
   const canViewOperationPool = !isKap20 && canViewChart('kap22.operation-pool')
   const canViewUserWallet = canViewChart(chartKey('user-wallet'))
   const canViewBurn = canViewChart(isKap20 ? 'kap20.redemption-burn' : 'kap22.burn-wallet')
+  const canViewRedemptionFee = isKap20 && canViewChart('kap20.redemption-fee')
   const canViewExpired = !isKap20 && canViewChart('kap22.expired')
   const canViewDailyCount = canViewChart(chartKey('daily-transaction-count'))
   const canViewTotalTransactions = !isKap20 && canViewDailyCount
-  const canViewKpis = canViewTotalTransactions || canViewMint || canViewBackupWallet || canViewWorkspaceWallet || canViewDistributorPool || canViewOperationPool || canViewUserWallet || canViewBurn || canViewExpired
+  const canViewKpis = canViewTotalTransactions || canViewMint || canViewBackupWallet || canViewWorkspaceWallet || canViewDistributorPool || canViewOperationPool || canViewUserWallet || canViewBurn || canViewRedemptionFee || canViewExpired
   const canViewDailyVolume = canViewChart(chartKey('daily-transfer-volume'))
   const canViewHeatmap = canViewChart(chartKey('activity-heatmap'))
   const canViewConversion = isKap20 && canViewChart('kap20.conversion-balance')
@@ -428,11 +432,12 @@ export default function Kap22AnalysisPage({ reportType = 'kap22' }: TokenAnalysi
         {canViewOperationPool && <KpiTile label="OperationPool" value={`${formatAmount(summary.operationPool)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="target" sparkColor="var(--accent-3)" />}
         {canViewUserWallet && <KpiTile label="User Wallet" value={`${formatAmount(isKap20 ? summary.userWallet ?? '0' : summary.transferToUsers)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="users" sparkColor="var(--accent-2)" />}
         {canViewBurn && <KpiTile label={isKap20 ? 'Redemption (Burn)' : 'Burn Wallet'} value={`${formatAmount(isKap20 ? summary.redemptionBurn ?? '0' : summary.burn)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="refresh" sparkColor="var(--danger)" />}
+        {canViewRedemptionFee && <KpiTile label="Redemption Fee" value={`${formatAmount(summary.redemptionFee ?? '0')} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="target" sparkColor="var(--warn)" />}
         {canViewExpired && <KpiTile label="Expired" value={`${formatAmount(summary.expired)} ${summary.token.symbol}`} valueTrailing={<TokenAvatar src={summary.token.imageUrl} symbol={summary.token.symbol} size="sm" />} icon="alert" sparkColor="var(--danger)" />}
       </section>}</div>}
 
       {canViewKpis && summary && !summary.reconciliationMatched ? <div className="mb-4" role="status">
-        <ErrorCard message={`KAP-22 reconciliation mismatch: ${formatAmount(summary.reconciliationDelta)} ${summary.token.symbol}`} />
+        <ErrorCard message={`${reportLabel} reconciliation mismatch: ${formatAmount(summary.reconciliationDelta)} ${summary.token.symbol}`} />
       </div> : null}
 
       <div className="mb-4 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">

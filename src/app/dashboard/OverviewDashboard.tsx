@@ -15,7 +15,7 @@ import { useChartPermissions } from '@/lib/ChartPermissionContext'
 
 interface Metric { value: string; change: number; imageUrl?: string | null; symbol?: string }
 interface Row { key: string; txId: string; timestamp: string; fromHash: string; toHash: string; fromName: string | null; toName: string | null; tokenName: string; tokenSymbol: string; standard: string; type: string; value: string; tokenId: string | null; status: string | null; imageUrl: string | null }
-interface Report { timezone: string; kpis: { totalTransactions: Metric; dailyGasFee: Metric; totalGasFee: Metric; kap20Distributed: Metric; kap20Redeemed: Metric; kap22: Array<Metric & { symbol: string }>; nftMint: Metric; nftBurn: Metric }; monthly: Array<{ label: string; kap20: number; kap22: number; kap721: number }>; transactions: { rows: Row[]; total: number; page: number; totalPages: number } }
+interface Report { timezone: string; kpis: { totalTransactions: Metric; dailyGasFee: Metric; totalGasFee: Metric; kap20Distributed: Metric; kap20Redeemed: Metric; redemptionFee: Metric; kap22: Array<Metric & { symbol: string }>; nftMint: Metric; nftBurn: Metric }; monthly: Array<{ label: string; kap20: number; kap22: number; kap721: number }>; transactions: { rows: Row[]; total: number; page: number; totalPages: number } }
 
 const compact = (value: string): string => value.length > 16 ? `${value.slice(0, 7)}…${value.slice(-5)}` : value
 function formatAmount(value: string): string { const number = Number(value); return Number.isFinite(number) ? number.toLocaleString('en-US', { maximumFractionDigits: 4 }) : value }
@@ -27,10 +27,11 @@ export function OverviewDashboard(): React.JSX.Element {
   const canViewTotalGasFee = canViewChart('overview.total-gas-fee')
   const canViewTokenDistributed = canViewChart('overview.token-distributed')
   const canViewTokenRedeemed = canViewChart('overview.token-redeemed')
+  const canViewRedemptionFee = canViewChart('overview.redemption-fee')
   const canViewNftMint = canViewChart('overview.nft-mint')
   const canViewNftBurn = canViewChart('overview.nft-burn')
   const canViewPointTokenDistributed = canViewChart('overview.point-token-distributed')
-  const canViewKpis = canViewTotalTransactions || canViewTotalGasFee || canViewTokenDistributed || canViewTokenRedeemed || canViewNftMint || canViewNftBurn || canViewPointTokenDistributed
+  const canViewKpis = canViewTotalTransactions || canViewTotalGasFee || canViewTokenDistributed || canViewTokenRedeemed || canViewRedemptionFee || canViewNftMint || canViewNftBurn || canViewPointTokenDistributed
   const canViewMonthly = canViewChart('overview.monthly-transactions')
   const canViewHistory = canViewChart('overview.transaction-history')
   const hasVisibleContent = canViewKpis || canViewMonthly || canViewHistory
@@ -59,7 +60,8 @@ export function OverviewDashboard(): React.JSX.Element {
         {canViewTotalTransactions && <KpiTile label="Total Transactions" value={formatAmount(report.kpis.totalTransactions.value)} icon="pulse" />}
         {canViewTotalGasFee && <KpiTile label="Total Gas Fee" value={`${formatKub(report.kpis.totalGasFee.value)} KUB`} valueTrailing={<TokenAvatar src="/assets/tokens/kub.png" symbol="KUB" size="sm" />} icon="zap" />}
         {canViewTokenDistributed && <KpiTile label="Token Distributed" value={`${formatAmount(report.kpis.kap20Distributed.value)} ${report.kpis.kap20Distributed.symbol ?? 'KAP-20'}`} valueTrailing={<TokenAvatar src={report.kpis.kap20Distributed.imageUrl} symbol={report.kpis.kap20Distributed.symbol ?? 'KAP-20'} size="sm" />} icon="users" />}
-        {canViewTokenRedeemed && <KpiTile label="Token Redeemed" value={`${formatAmount(report.kpis.kap20Redeemed.value)} ${report.kpis.kap20Redeemed.symbol ?? 'KAP-20'}`} valueTrailing={<TokenAvatar src={report.kpis.kap20Redeemed.imageUrl} symbol={report.kpis.kap20Redeemed.symbol ?? 'KAP-20'} size="sm" />} icon="cart" />}
+        {canViewTokenRedeemed && <KpiTile label="Redemption (Burn)" value={`${formatAmount(report.kpis.kap20Redeemed.value)} ${report.kpis.kap20Redeemed.symbol ?? 'KAP-20'}`} valueTrailing={<TokenAvatar src={report.kpis.kap20Redeemed.imageUrl} symbol={report.kpis.kap20Redeemed.symbol ?? 'KAP-20'} size="sm" />} icon="cart" />}
+        {canViewRedemptionFee && <KpiTile label="Redemption Fee" value={`${formatAmount(report.kpis.redemptionFee.value)} ${report.kpis.redemptionFee.symbol ?? 'KAP-20'}`} valueTrailing={<TokenAvatar src={report.kpis.redemptionFee.imageUrl} symbol={report.kpis.redemptionFee.symbol ?? 'KAP-20'} size="sm" />} icon="target" />}
         {canViewNftMint && <KpiTile label="NFT Mint" value={`${formatAmount(report.kpis.nftMint.value)} NFTs`} valueTrailing={<TokenAvatar src={report.kpis.nftMint.imageUrl} symbol="NFT" size="sm" />} icon="arrowUp" />}
         {canViewNftBurn && <KpiTile label="NFT Burn" value={`${formatAmount(report.kpis.nftBurn.value)} NFTs`} valueTrailing={<TokenAvatar src={report.kpis.nftBurn.imageUrl} symbol="NFT" size="sm" />} icon="refresh" />}
         {canViewPointTokenDistributed && report.kpis.kap22.map((metric) => <KpiTile key={metric.symbol} label="Point Token Distributed" value={`${formatAmount(metric.value)} ${metric.symbol}`} valueTrailing={<TokenAvatar src={metric.imageUrl} symbol={metric.symbol} size="sm" />} icon="box" />)}
