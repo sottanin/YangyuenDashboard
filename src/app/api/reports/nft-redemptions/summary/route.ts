@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { canAccessAnyChart, canAccessChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
-import { getNftRedemptionsSummary } from '@/lib/reporting/nftRedemptionsAnalysis'
+import { getNftRedemptionsSummary, InvalidReportTokenError } from '@/lib/reporting/nftRedemptionsAnalysis'
+import { parseReportDateRange, ReportPeriodError } from '@/lib/reporting/reportPeriod'
 import { isSelectableReportWorkspace, parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -12,7 +13,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!await isSelectableReportWorkspace(workspace)) return NextResponse.json({ error: 'Select one workspace' }, { status: 400 })
   if (!canAccessWorkspace(admin, workspace)) return NextResponse.json({ error: 'Workspace access denied' }, { status: 403 })
   try {
-    const summary = await getNftRedemptionsSummary(workspace)
+    const token = request.nextUrl.searchParams.get('token') ?? ''
+    const range = await parseReportDateRange(request.nextUrl.searchParams)
+    const summary = await getNftRedemptionsSummary(workspace, token, range)
     const canViewNftMetadata = canAccessAnyChart(admin, ['nft.nft-mint', 'nft.nft-burn'])
     const canViewKap20Metadata = canAccessAnyChart(admin, ['nft.kap20-burn', 'nft.kap20-fee'])
     return NextResponse.json({ ...summary,
@@ -26,6 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       kap20ImageUrl: canViewKap20Metadata ? summary.kap20ImageUrl : null,
     })
   } catch (error) {
+    if (error instanceof ReportPeriodError || error instanceof InvalidReportTokenError) return NextResponse.json({ error: error.message }, { status: 400 })
     console.error('NFT redemption summary error:', error)
     return NextResponse.json({ error: 'Unable to load NFT redemption summary' }, { status: 500 })
   }

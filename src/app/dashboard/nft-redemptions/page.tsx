@@ -12,6 +12,8 @@ import { TokenAvatar } from '@/components/ui/TokenAvatar'
 import { useWorkspace } from '@/lib/WorkspaceContext'
 import { useChartPermissions } from '@/lib/ChartPermissionContext'
 import { AddressLink } from '@/components/ui/AddressLink'
+import { ReportFilters, type ReportTokenOption } from '@/components/reports/ReportFilters'
+import type { ReportPeriod } from '@/lib/reporting/reportPeriod'
 
 interface SummaryResponse { nftMint: number; nftBurn: number; nftSymbol: string; nftImageUrl: string | null; kap20Burn: string; kap20Fee: string; kap20Symbol: string; kap20ImageUrl: string | null; timezone: string }
 interface TransactionRow {
@@ -80,37 +82,65 @@ export default function NftRedemptionsPage(): React.JSX.Element {
   const [page, setPage] = useState(1)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  const [tokens, setTokens] = useState<ReportTokenOption[]>([])
+  const [selectedToken, setSelectedToken] = useState('')
+  const [tokensLoading, setTokensLoading] = useState(true)
+  const [tokensError, setTokensError] = useState('')
+  const [tokenWorkspace, setTokenWorkspace] = useState('')
+  const [period, setPeriod] = useState<ReportPeriod>('all')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const [historyStart, setHistoryStart] = useState('')
+  const [today, setToday] = useState('')
   const requestIds = useRef({ summary: 0, chart: 0, table: 0 })
+  const customError = period === 'custom' ? (!customFrom || !customTo ? 'Select both From and To dates.' : customFrom > customTo ? 'From date must be on or before To date.' : customTo > today ? 'To date cannot be in the future.' : customFrom < historyStart ? 'From date cannot be before the business history start.' : '') : ''
+  const reportParams = useCallback((): URLSearchParams => {
+    const params = new URLSearchParams({ workspace, token: selectedToken, period })
+    if (period === 'custom') { params.set('from', customFrom); params.set('to', customTo) }
+    return params
+  }, [customFrom, customTo, period, selectedToken, workspace])
+
+  const loadTokens = useCallback(async (signal?: AbortSignal): Promise<void> => {
+    setTokensLoading(true); setTokensError('')
+    try {
+      const data = await readResponse<{ tokens: ReportTokenOption[]; historyStart: string; today: string }>(await fetch(`/api/reports/nft-redemptions/tokens?workspace=${encodeURIComponent(workspace)}`, { signal }))
+      setTokens(data.tokens); setTokenWorkspace(workspace); setHistoryStart(data.historyStart); setToday(data.today)
+      const preferred = data.tokens.find((token) => token.symbol.toUpperCase() === 'ICCYYN') ?? data.tokens[0]
+      setSelectedToken(preferred?.address ?? '')
+    } catch (error) {
+      if (!signal?.aborted) { setTokens([]); setSelectedToken(''); setTokenWorkspace(''); setTokensError(error instanceof Error ? error.message : 'Unable to load token options') }
+    } finally { if (!signal?.aborted) setTokensLoading(false) }
+  }, [workspace])
 
   const loadSummary = useCallback(async (signal?: AbortSignal): Promise<void> => {
     const id = ++requestIds.current.summary
     setSummaryLoading(true); setSummaryError('')
     try {
-      const data = await readResponse<SummaryResponse>(await fetch(`/api/reports/nft-redemptions/summary?workspace=${encodeURIComponent(workspace)}`, { signal }))
+      const data = await readResponse<SummaryResponse>(await fetch(`/api/reports/nft-redemptions/summary?${reportParams()}`, { signal }))
       if (id === requestIds.current.summary) setSummary(data)
     } catch (error) {
       if (!signal?.aborted && id === requestIds.current.summary) { setSummary(null); setSummaryError(error instanceof Error ? error.message : 'Unable to load summary') }
     } finally { if (id === requestIds.current.summary) setSummaryLoading(false) }
-  }, [workspace])
+  }, [reportParams])
 
   const loadChart = useCallback(async (signal?: AbortSignal): Promise<void> => {
     const id = ++requestIds.current.chart
     setChartLoading(true); setChartError('')
     try {
       const [redemptions, burns] = await Promise.all([
-        canViewTopRedemptions ? readResponse<{ rows: NftRedemptionBarPoint[] }>(await fetch(`/api/reports/nft-redemptions/top-nfts?workspace=${encodeURIComponent(workspace)}`, { signal })) : Promise.resolve({ rows: [] }),
-        canViewTopBurns ? readResponse<{ rows: NftRedemptionBarPoint[] }>(await fetch(`/api/reports/nft-redemptions/top-burns?workspace=${encodeURIComponent(workspace)}`, { signal })) : Promise.resolve({ rows: [] }),
+        canViewTopRedemptions ? readResponse<{ rows: NftRedemptionBarPoint[] }>(await fetch(`/api/reports/nft-redemptions/top-nfts?${reportParams()}`, { signal })) : Promise.resolve({ rows: [] }),
+        canViewTopBurns ? readResponse<{ rows: NftRedemptionBarPoint[] }>(await fetch(`/api/reports/nft-redemptions/top-burns?${reportParams()}`, { signal })) : Promise.resolve({ rows: [] }),
       ])
       if (id === requestIds.current.chart) { setTopNfts(redemptions.rows); setTopBurns(burns.rows) }
     } catch (error) {
       if (!signal?.aborted && id === requestIds.current.chart) { setTopNfts([]); setTopBurns([]); setChartError(error instanceof Error ? error.message : 'Unable to load NFT rankings') }
     } finally { if (id === requestIds.current.chart) setChartLoading(false) }
-  }, [canViewTopBurns, canViewTopRedemptions, workspace])
+  }, [canViewTopBurns, canViewTopRedemptions, reportParams])
 
   const loadTransactions = useCallback(async (requestedPage: number, requestedSearch: string, signal?: AbortSignal): Promise<void> => {
     const id = ++requestIds.current.table
     setTableLoading(true); setTableError('')
-    const params = new URLSearchParams({ workspace, page: String(requestedPage), limit: String(PAGE_SIZE) })
+    const params = reportParams(); params.set('page', String(requestedPage)); params.set('limit', String(PAGE_SIZE))
     if (requestedSearch) params.set('search', requestedSearch)
     try {
       const data = await readResponse<TransactionsResponse>(await fetch(`/api/reports/nft-redemptions/transactions?${params}`, { signal }))
@@ -118,19 +148,21 @@ export default function NftRedemptionsPage(): React.JSX.Element {
     } catch (error) {
       if (!signal?.aborted && id === requestIds.current.table) { setTransactions(null); setTableError(error instanceof Error ? error.message : 'Unable to load transaction history') }
     } finally { if (id === requestIds.current.table) setTableLoading(false) }
-  }, [workspace])
+  }, [reportParams])
 
   useEffect(() => {
-    if (workspaceLoading) return
+    if (workspaceLoading || workspace === 'all') return
     const controller = new AbortController()
-    queueMicrotask(() => {
-      if (controller.signal.aborted) return
-      setPage(1); setSearchInput(''); setSearch('')
-      if (canViewKpis) void loadSummary(controller.signal)
-      if (canViewRankings) void loadChart(controller.signal)
-    })
+    queueMicrotask(() => { if (!controller.signal.aborted) { setPage(1); setSearchInput(''); setSearch(''); setSummary(null); setTopNfts([]); setTopBurns([]); setTransactions(null); setTokens([]); setTokenWorkspace(''); setSelectedToken(''); void loadTokens(controller.signal) } })
     return () => controller.abort()
-  }, [canViewKpis, canViewRankings, workspaceLoading, loadSummary, loadChart])
+  }, [loadTokens, workspace, workspaceLoading])
+
+  useEffect(() => {
+    if (workspaceLoading || !selectedToken || tokenWorkspace !== workspace || customError) return
+    const controller = new AbortController()
+    queueMicrotask(() => { if (!controller.signal.aborted) { if (canViewKpis) void loadSummary(controller.signal); if (canViewRankings) void loadChart(controller.signal) } })
+    return () => controller.abort()
+  }, [canViewKpis, canViewRankings, customError, loadChart, loadSummary, selectedToken, tokenWorkspace, workspace, workspaceLoading])
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setSearch(searchInput.trim().length >= 2 ? searchInput.trim() : ''); setPage(1) }, 375)
@@ -138,25 +170,29 @@ export default function NftRedemptionsPage(): React.JSX.Element {
   }, [searchInput])
 
   useEffect(() => {
-    if (workspaceLoading || !canViewHistory) return
+    if (workspaceLoading || !canViewHistory || !selectedToken || tokenWorkspace !== workspace || customError) return
     const controller = new AbortController()
     queueMicrotask(() => { if (!controller.signal.aborted) void loadTransactions(page, search, controller.signal) })
     return () => controller.abort()
-  }, [canViewHistory, workspaceLoading, page, search, loadTransactions])
+  }, [canViewHistory, customError, workspaceLoading, page, search, loadTransactions, selectedToken, tokenWorkspace, workspace])
 
   return <div className="min-w-0 max-w-full">
-    <PageHeader title="NFT Redemptions (KAP-721)" subtitle="NFT mint, burn, redemption payments and marketplace fees" />
+    <PageHeader title="NFT Redemptions (KAP-721)" subtitle="NFT mint, burn, redemption payments and marketplace fees" actions={hasVisibleContent ? <ReportFilters idPrefix="nft-redemptions" tokens={tokens} token={selectedToken} period={period} customFrom={customFrom} customTo={customTo} disabled={tokensLoading} minDate={historyStart} maxDate={today} onTokenChange={(value) => { setSelectedToken(value); setPage(1) }} onPeriodChange={(value) => { setPeriod(value); setPage(1) }} onCustomFromChange={(value) => { setCustomFrom(value); setPage(1) }} onCustomToChange={(value) => { setCustomTo(value); setPage(1) }} /> : undefined} />
+
+    {tokensError ? <div className="mb-4"><ErrorCard message={tokensError} onRetry={() => void loadTokens()} /></div> : null}
+    {customError ? <div className="mb-4" role="alert"><ErrorCard message={customError} /></div> : null}
+    {!tokensLoading && !tokensError && tokens.length === 0 ? <Card><div className="py-12 text-center"><div className="text-sm font-medium text-default">No active KAP-20 tokens</div><p className="mt-1 text-xs text-muted">Add an active primary token contract in the registry.</p></div></Card> : null}
 
     {!hasVisibleContent ? <section role="status" className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-default px-6 py-12 text-center"><h2 className="text-base font-semibold text-default">No report content available</h2><p className="mt-2 max-w-md text-sm text-muted">Your role allows access to this menu, but no charts or content are assigned. Contact an administrator if you need access.</p></section> : null}
 
-    {canViewKpis && <div>{summaryError ? <div className="mb-4"><ErrorCard message={summaryError} onRetry={() => void loadSummary()} /></div> : summaryLoading || !summary ? <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: [canViewNftMint, canViewNftBurn, canViewKap20Burn, canViewKap20Fee].filter(Boolean).length }, (_, index) => <SkeletonKpi key={index} />)}</div> : <section className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="NFT redemption key performance indicators">
+    {canViewKpis && tokens.length > 0 && !customError && !tokensError && <div>{summaryError ? <div className="mb-4"><ErrorCard message={summaryError} onRetry={() => void loadSummary()} /></div> : summaryLoading || tokensLoading || !summary ? <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: [canViewNftMint, canViewNftBurn, canViewKap20Burn, canViewKap20Fee].filter(Boolean).length }, (_, index) => <SkeletonKpi key={index} />)}</div> : <section className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="NFT redemption key performance indicators">
       {canViewNftMint && <KpiTile label="NFT Mint" value={`${summary.nftMint.toLocaleString()} NFTs`} valueTrailing={<TokenAvatar src={summary.nftImageUrl} symbol={summary.nftSymbol} size="sm" />} icon="arrowUp" sparkColor="var(--success)" />}
       {canViewNftBurn && <KpiTile label="NFT Burn" value={`${summary.nftBurn.toLocaleString()} NFTs`} valueTrailing={<TokenAvatar src={summary.nftImageUrl} symbol={summary.nftSymbol} size="sm" />} icon="flame" sparkColor="var(--danger)" />}
       {canViewKap20Burn && <KpiTile label="Token (KAP-20) Burn" value={`${formatAmount(summary.kap20Burn)} ${summary.kap20Symbol}`} valueTrailing={<TokenAvatar src={summary.kap20ImageUrl} symbol={summary.kap20Symbol} size="sm" />} icon="refresh" sparkColor="var(--danger)" />}
       {canViewKap20Fee && <KpiTile label="Token (KAP-20) Fee" value={`${formatAmount(summary.kap20Fee)} ${summary.kap20Symbol}`} valueTrailing={<TokenAvatar src={summary.kap20ImageUrl} symbol={summary.kap20Symbol} size="sm" />} icon="target" sparkColor="var(--warn)" />}
     </section>}</div>}
 
-    {canViewRankings && <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-2" aria-label="NFT rankings">
+    {canViewRankings && tokens.length > 0 && !customError && !tokensError && <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-2" aria-label="NFT rankings">
       {canViewTopRedemptions && <Card title="Top 10 NFT Redemptions" subtitle="จัดอันดับ NFT 10 รายการที่ถูกแลกมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
         {chartError ? <ErrorCard message={chartError} onRetry={() => void loadChart()} /> : chartLoading ? <div className="h-[340px] shimmer rounded-xl" /> : topNfts.length === 0 ? <div className="flex h-[280px] items-center justify-center text-sm text-muted">No minted NFT redemption data found</div> : <NftRedemptionBarChart data={topNfts} />}
       </Card>}
@@ -165,7 +201,7 @@ export default function NftRedemptionsPage(): React.JSX.Element {
       </Card>}
     </section>}
 
-    {canViewHistory && <Card title="Transaction History" subtitle="ตารางแสดงธุรกรรม NFT ทั้งหมด พร้อม Token ID ผู้ส่ง ผู้รับ และสถานะธุรกรรม" noPad>
+    {canViewHistory && tokens.length > 0 && !customError && !tokensError && <Card title="Transaction History" subtitle="ตารางแสดงธุรกรรม NFT ทั้งหมด พร้อม Token ID ผู้ส่ง ผู้รับ และสถานะธุรกรรม" noPad>
       <div className="border-b border-default p-4 sm:p-5">
         <label htmlFor="nft-redemption-search" className="sr-only">Search NFT redemption transactions</label>
         <div className="relative max-w-xl">

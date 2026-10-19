@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { BarChart } from '@/components/charts/BarChart'
 import { Card } from '@/components/ui/Card'
 import { ErrorCard } from '@/components/ui/ErrorCard'
@@ -12,6 +12,8 @@ import { TokenAvatar } from '@/components/ui/TokenAvatar'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { useWorkspace } from '@/lib/WorkspaceContext'
 import { useChartPermissions } from '@/lib/ChartPermissionContext'
+import { ReportFilters, type ReportTokenOption } from '@/components/reports/ReportFilters'
+import type { ReportPeriod } from '@/lib/reporting/reportPeriod'
 
 interface Metric { value: string; change: number; imageUrl?: string | null; symbol?: string }
 interface Row { key: string; txId: string; timestamp: string; fromHash: string; toHash: string; fromName: string | null; toName: string | null; tokenName: string; tokenSymbol: string; standard: string; type: string; value: string; tokenId: string | null; status: string | null; imageUrl: string | null }
@@ -42,20 +44,56 @@ export function OverviewDashboard(): React.JSX.Element {
   const [page, setPage] = useState(1)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  const [tokens, setTokens] = useState<ReportTokenOption[]>([])
+  const [selectedToken, setSelectedToken] = useState('')
+  const [tokensLoading, setTokensLoading] = useState(true)
+  const [tokensError, setTokensError] = useState('')
+  const [tokenWorkspace, setTokenWorkspace] = useState('')
+  const [period, setPeriod] = useState<ReportPeriod>('all')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const [historyStart, setHistoryStart] = useState('')
+  const [today, setToday] = useState('')
+  const requestId = useRef(0)
+  const customError = period === 'custom' ? (!customFrom || !customTo ? 'Select both From and To dates.' : customFrom > customTo ? 'From date must be on or before To date.' : customTo > today ? 'To date cannot be in the future.' : customFrom < historyStart ? 'From date cannot be before the business history start.' : '') : ''
+  const loadTokens = useCallback(async (signal?: AbortSignal): Promise<void> => {
+    setTokensLoading(true); setTokensError('')
+    try {
+      const response = await fetch(`/api/reports/overview/tokens?workspace=${encodeURIComponent(String(selected.id))}`, { signal })
+      const body = await response.json() as { tokens?: ReportTokenOption[]; historyStart?: string; today?: string; error?: string }
+      if (!response.ok) throw new Error(body.error ?? 'Unable to load token options')
+      const options = body.tokens ?? []
+      setTokens(options); setTokenWorkspace(String(selected.id)); setHistoryStart(body.historyStart ?? ''); setToday(body.today ?? '')
+      const preferred = options.find((token) => token.symbol.toUpperCase() === 'ICCYYN') ?? options[0]
+      setSelectedToken(preferred?.address ?? '')
+    } catch (reason) {
+      if (!signal?.aborted) { setTokens([]); setSelectedToken(''); setTokenWorkspace(''); setTokensError(reason instanceof Error ? reason.message : 'Unable to load token options') }
+    } finally { if (!signal?.aborted) setTokensLoading(false) }
+  }, [selected.id])
   useEffect(() => { queueMicrotask(() => { setPage(1); setSearchInput(''); setSearch('') }) }, [selected.id])
-  useEffect(() => { const timer = window.setTimeout(() => { setSearch(searchInput.trim().length >= 2 ? searchInput.trim() : ''); setPage(1) }, 350); return () => window.clearTimeout(timer) }, [searchInput])
   useEffect(() => {
     if (workspaceLoading || selected.id === 'all' || !hasVisibleContent) return
     const controller = new AbortController()
-    queueMicrotask(() => { if (!controller.signal.aborted) { setLoading(true); setError('') } })
-    const query = new URLSearchParams({ workspace: String(selected.id), page: String(page) }); if (search) query.set('search', search)
-    fetch(`/api/reports/overview?${query}`, { signal: controller.signal }).then(async (response) => { const body: unknown = await response.json(); if (!response.ok) throw new Error(body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Unable to load overview'); return body as Report }).then((body) => { if (!controller.signal.aborted) setReport(body) }).catch((reason: unknown) => { if (!controller.signal.aborted) { setReport(null); setError(reason instanceof Error ? reason.message : 'Unable to load overview') } }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    queueMicrotask(() => { setReport(null); setError(''); setTokens([]); setTokenWorkspace(''); setSelectedToken(''); void loadTokens(controller.signal) })
     return () => controller.abort()
-  }, [hasVisibleContent, page, search, selected.id, workspaceLoading])
-  return <div className="min-w-0 max-w-full"><PageHeader title="Overview" subtitle={`Workspace blockchain activity · ${selected.name}`} />
+  }, [hasVisibleContent, loadTokens, selected.id, workspaceLoading])
+  useEffect(() => { const timer = window.setTimeout(() => { setSearch(searchInput.trim().length >= 2 ? searchInput.trim() : ''); setPage(1) }, 350); return () => window.clearTimeout(timer) }, [searchInput])
+  useEffect(() => {
+    if (workspaceLoading || selected.id === 'all' || !hasVisibleContent || !selectedToken || tokenWorkspace !== String(selected.id) || customError) return
+    const controller = new AbortController()
+    const currentRequest = ++requestId.current
+    queueMicrotask(() => { if (!controller.signal.aborted) { setLoading(true); setError('') } })
+    const query = new URLSearchParams({ workspace: String(selected.id), token: selectedToken, period, page: String(page) }); if (period === 'custom') { query.set('from', customFrom); query.set('to', customTo) }; if (search) query.set('search', search)
+    fetch(`/api/reports/overview?${query}`, { signal: controller.signal }).then(async (response) => { const body: unknown = await response.json(); if (!response.ok) throw new Error(body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Unable to load overview'); return body as Report }).then((body) => { if (!controller.signal.aborted && currentRequest === requestId.current) setReport(body) }).catch((reason: unknown) => { if (!controller.signal.aborted && currentRequest === requestId.current) { setReport(null); setError(reason instanceof Error ? reason.message : 'Unable to load overview') } }).finally(() => { if (!controller.signal.aborted && currentRequest === requestId.current) setLoading(false) })
+    return () => controller.abort()
+  }, [customError, customFrom, customTo, hasVisibleContent, page, period, search, selected.id, selectedToken, tokenWorkspace, workspaceLoading])
+  return <div className="min-w-0 max-w-full"><PageHeader title="Overview" subtitle={`Workspace blockchain activity · ${selected.name}`} actions={hasVisibleContent ? <ReportFilters idPrefix="overview" tokens={tokens} token={selectedToken} period={period} customFrom={customFrom} customTo={customTo} disabled={tokensLoading} minDate={historyStart} maxDate={today} onTokenChange={(value) => { setSelectedToken(value); setPage(1) }} onPeriodChange={(value) => { setPeriod(value); setPage(1) }} onCustomFromChange={(value) => { setCustomFrom(value); setPage(1) }} onCustomToChange={(value) => { setCustomTo(value); setPage(1) }} /> : undefined} />
+    {tokensError ? <div className="mb-4"><ErrorCard message={tokensError} onRetry={() => void loadTokens()} /></div> : null}
+    {customError ? <div className="mb-4" role="alert"><ErrorCard message={customError} /></div> : null}
+    {!tokensLoading && !tokensError && tokens.length === 0 ? <Card><div className="py-12 text-center"><div className="text-sm font-medium text-default">No active KAP-20 tokens</div><p className="mt-1 text-xs text-muted">Add an active primary token contract in the registry.</p></div></Card> : null}
     {!hasVisibleContent ? <section role="status" className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-default px-6 py-12 text-center"><h2 className="text-base font-semibold text-default">No report content available</h2><p className="mt-2 max-w-md text-sm text-muted">Your role allows access to this menu, but no charts or content are assigned. Contact an administrator if you need access.</p></section> : null}
     {error ? <div className="mb-4"><ErrorCard message={error} /></div> : null}
-    {hasVisibleContent && (loading || !report) ? <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <SkeletonKpi key={index} />)}</div> : report ? <>
+    {hasVisibleContent && tokens.length > 0 && !customError && !tokensError && (loading || tokensLoading || !report) ? <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <SkeletonKpi key={index} />)}</div> : report && !customError ? <>
       {canViewKpis && <section className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {canViewTotalTransactions && <KpiTile label="Total Transactions" value={formatAmount(report.kpis.totalTransactions.value)} icon="pulse" />}
         {canViewTotalGasFee && <KpiTile label="Total Gas Fee" value={`${formatKub(report.kpis.totalGasFee.value)} KUB`} valueTrailing={<TokenAvatar src="/assets/tokens/kub.png" symbol="KUB" size="sm" />} icon="zap" />}

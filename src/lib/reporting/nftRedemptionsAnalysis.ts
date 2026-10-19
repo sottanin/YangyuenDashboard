@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { normalizeAddress } from '@/lib/system/addresses'
 import { getReportingConfig } from '@/lib/system/config'
+import type { ReportDateRange } from './reportPeriod'
 
 interface TopNftRow {
   name: string
@@ -9,6 +10,14 @@ interface TopNftRow {
   token_address: string
   token_id: string
 }
+interface NftCountRow { mint: bigint; burn: bigint }
+interface NftTransactionSqlRow {
+  id: string; key: string; tx_id: string; timestamp: Date; from_hash: string; to_hash: string
+  token_address: string; token_name: string; token_symbol: string; token_id: string | null; status: string | null
+}
+interface CountRow { total: bigint }
+
+export class InvalidReportTokenError extends Error {}
 
 function nftArtworkUrl(workspace: number | 'all', tokenAddress: string, tokenId: string): string {
   const params = new URLSearchParams({ workspace: String(workspace), contract: tokenAddress, tokenId })
@@ -26,7 +35,7 @@ function addressArray(values: string[]): Prisma.Sql {
     : Prisma.sql`ARRAY[]::text[]`
 }
 
-async function reportContext(workspace: number | 'all') {
+async function reportContext(workspace: number | 'all', tokenAddress?: string) {
   const workspaceWhere = workspace === 'all' ? {} : { workspaceId: workspace }
   const nftWorkspaceWhere = workspace === 'all'
     ? {}
@@ -35,7 +44,7 @@ async function reportContext(workspace: number | 'all') {
     ? {}
     : { OR: [{ workspaceId: workspace }, { workspace: { name: 'SYSTEM' } }, { role: 'MARKETPLACE', aggregateAcrossWorkspaces: true }] }
 
-  const [config, nftContracts, kap20Contracts, addresses, allAddressContracts, allTokenContracts] = await Promise.all([
+  const [config, nftContracts, allKap20Contracts, addresses, allAddressContracts, allTokenContracts] = await Promise.all([
     getReportingConfig(),
     prisma.tokenContract.findMany({
       where: { standard: 'KAP-721', active: true, ...nftWorkspaceWhere },
@@ -58,25 +67,54 @@ async function reportContext(workspace: number | 'all') {
   const localNft = workspace === 'all' ? undefined : nftContracts.find((contract) => contract.workspaceId === workspace)
   const displayNft = localNft ?? nftContracts[0]
   const imageNft = (localNft?.imageKey ? localNft : undefined) ?? nftContracts.find((contract) => contract.imageKey)
+  const kap20Contracts = tokenAddress
+    ? allKap20Contracts.filter((contract) => contract.normalizedAddress === normalizeAddress(tokenAddress))
+    : allKap20Contracts
+  if (tokenAddress && kap20Contracts.length === 0) throw new InvalidReportTokenError('Select an active KAP-20 token for this workspace')
 
   return {
     nftAddresses: nftContracts.map((contract) => contract.normalizedAddress),
     nftSymbol: displayNft?.symbol ?? displayNft?.name ?? 'NFT',
     nftImageUrl: imageNft ? nftRegistryImageUrl(workspace, imageNft.normalizedAddress) : null,
     kap20Addresses: kap20Contracts.map((contract) => contract.normalizedAddress),
+    selectedKap20Address: kap20Contracts[0]?.normalizedAddress ?? '',
     kap20Symbol: kap20Contracts[0]?.symbol ?? 'KAP-20',
     kap20ImageUrl: kap20Contracts[0]?.imageKey ? `/api/contracts/token/${kap20Contracts[0].id}/image` : null,
+    requireTokenAssociation: allKap20Contracts.length > 1,
     historyStart: new Date(config.businessHistoryStart),
     timezone: config.reportingTimezone,
     zeroAddresses: addresses.filter((address) => address.role === 'ZERO').map((address) => address.normalizedAddress),
     marketplaceAddresses: addresses.filter((address) => address.role === 'MARKETPLACE').map((address) => address.normalizedAddress),
     feeAddresses: addresses.filter((address) => address.role === 'MARKETPLACE_FEE').map((address) => address.normalizedAddress),
-    registeredAddresses: [...allAddressContracts, ...allTokenContracts].map((entry) => entry.address),
+    registeredAddresses: [...allAddressContracts, ...allTokenContracts].map((entry) => normalizeAddress(entry.address)),
   }
 }
 
-export async function getNftRedemptionsSummary(workspace: number | 'all') {
-  const context = await reportContext(workspace)
+function nftTokenAssociation(context: Awaited<ReturnType<typeof reportContext>>, detailAlias: string): Prisma.Sql {
+  if (!context.requireTokenAssociation) return Prisma.empty
+  const detail = Prisma.raw(detailAlias)
+  return Prisma.sql`AND EXISTS (
+    SELECT 1 FROM "RedemptionTransactionDetail" mint
+    JOIN "TransactionDetail" payment ON payment."txId"=mint."txId"
+    WHERE LOWER(mint."tokenAddress")=LOWER(${detail}."tokenAddress") AND mint."tokenId"=${detail}."tokenId"
+      AND LOWER(mint."fromHash")=ANY(${addressArray(context.zeroAddresses)})
+      AND LOWER(payment."tokenAddress")=${context.selectedKap20Address}
+      AND LOWER(payment."toHash")=ANY(${addressArray(context.marketplaceAddresses)})
+      AND NOT(LOWER(payment."fromHash")=ANY(${addressArray(context.registeredAddresses)}))
+  )`
+}
+
+export async function listNftReportTokens(workspace: number | 'all') {
+  const tokens = await prisma.tokenContract.findMany({
+    where: { standard: 'KAP-20', role: 'PRIMARY_TOKEN', active: true, ...(workspace === 'all' ? {} : { workspaceId: workspace }) },
+    select: { id: true, name: true, symbol: true, address: true, imageKey: true },
+    orderBy: [{ name: 'asc' }, { normalizedAddress: 'asc' }],
+  })
+  return tokens.map((token) => ({ id: token.id, name: token.name, symbol: token.symbol ?? token.name, address: token.address, imageUrl: token.imageKey ? `/api/contracts/token/${token.id}/image` : null }))
+}
+
+export async function getNftRedemptionsSummary(workspace: number | 'all', tokenAddress: string, range: ReportDateRange) {
+  const context = await reportContext(workspace, tokenAddress)
   if (context.nftAddresses.length === 0) {
     return { nftMint: 0, nftBurn: 0, nftSymbol: context.nftSymbol, nftImageUrl: context.nftImageUrl, kap20Burn: '0', kap20Fee: '0', kap20Symbol: context.kap20Symbol, kap20ImageUrl: context.kap20ImageUrl, timezone: context.timezone }
   }
@@ -86,20 +124,22 @@ export async function getNftRedemptionsSummary(workspace: number | 'all') {
       fromHash: { in: context.registeredAddresses, mode: 'insensitive' as const },
     },
   }
-  const toUserWallet = { NOT: { toHash: { in: context.registeredAddresses, mode: 'insensitive' as const } } }
-  const nftScope = { tokenAddress: { in: context.nftAddresses, mode: 'insensitive' as const } }
-
-  const [nftMint, nftBurn, kap20Burn, kap20Fee] = await Promise.all([
-    prisma.redemptionTransactionDetail.count({
-      where: { ...nftScope, timestamp: { gte: context.historyStart }, fromHash: { in: context.zeroAddresses, mode: 'insensitive' }, ...toUserWallet },
-    }),
-    prisma.redemptionTransactionDetail.count({
-      where: { ...nftScope, timestamp: { gte: context.historyStart }, toHash: { in: context.zeroAddresses, mode: 'insensitive' }, ...fromUserWallet },
-    }),
+  const [nftCounts, kap20Burn, kap20Fee] = await Promise.all([
+    prisma.$queryRaw<NftCountRow[]>(Prisma.sql`
+      WITH scoped AS (
+        SELECT detail.* FROM "RedemptionTransactionDetail" detail
+        WHERE LOWER(detail."tokenAddress")=ANY(${addressArray(context.nftAddresses)})
+          AND detail."timestamp">=${range.start} AND detail."timestamp"<${range.end}
+          ${nftTokenAssociation(context, 'detail')}
+      )
+      SELECT COUNT(*) FILTER (WHERE LOWER("fromHash")=ANY(${addressArray(context.zeroAddresses)}) AND NOT(LOWER("toHash")=ANY(${addressArray(context.registeredAddresses)})))::bigint mint,
+        COUNT(*) FILTER (WHERE LOWER("toHash")=ANY(${addressArray(context.zeroAddresses)}) AND NOT(LOWER("fromHash")=ANY(${addressArray(context.registeredAddresses)})))::bigint burn
+      FROM scoped
+    `),
     prisma.transactionDetail.aggregate({
       where: {
         tokenAddress: { in: context.kap20Addresses, mode: 'insensitive' },
-        timestamp: { gte: context.historyStart },
+        timestamp: { gte: range.start, lt: range.end },
         toHash: { in: context.marketplaceAddresses, mode: 'insensitive' },
         ...fromUserWallet,
       },
@@ -108,7 +148,7 @@ export async function getNftRedemptionsSummary(workspace: number | 'all') {
     prisma.transactionDetail.aggregate({
       where: {
         tokenAddress: { in: context.kap20Addresses, mode: 'insensitive' },
-        timestamp: { gte: context.historyStart },
+        timestamp: { gte: range.start, lt: range.end },
         fromHash: { in: context.marketplaceAddresses, mode: 'insensitive' },
         toHash: { in: context.feeAddresses, mode: 'insensitive' },
       },
@@ -123,9 +163,10 @@ export async function getNftRedemptionsSummary(workspace: number | 'all') {
     grossKap20Burn.sub(totalKap20Fee),
   )
 
+  const nftCount = nftCounts[0] ?? { mint: BigInt(0), burn: BigInt(0) }
   return {
-    nftMint,
-    nftBurn,
+    nftMint: Number(nftCount.mint),
+    nftBurn: Number(nftCount.burn),
     nftSymbol: context.nftSymbol,
     nftImageUrl: context.nftImageUrl,
     kap20Burn: netKap20Burn.toString(),
@@ -136,9 +177,9 @@ export async function getNftRedemptionsSummary(workspace: number | 'all') {
   }
 }
 
-export async function getTopNftRedemptions(workspace: number | 'all') {
+export async function getTopNftRedemptions(workspace: number | 'all', tokenAddress: string, range: ReportDateRange) {
   if (workspace === 'all') return []
-  const context = await reportContext(workspace)
+  const context = await reportContext(workspace, tokenAddress)
   if (context.nftAddresses.length === 0) return []
   const rows = await prisma.$queryRaw<TopNftRow[]>(Prisma.sql`
     WITH minted_instances AS (
@@ -148,8 +189,10 @@ export async function getTopNftRedemptions(workspace: number | 'all') {
       FROM "RedemptionTransactionDetail" detail
       WHERE LOWER(detail."tokenAddress") = ANY(${addressArray(context.nftAddresses)})
         AND LOWER(detail."fromHash") = ANY(${addressArray(context.zeroAddresses)})
-        AND detail."timestamp" >= ${context.historyStart}
+        AND detail."timestamp" >= ${range.start}
+        AND detail."timestamp" < ${range.end}
         AND detail."tokenId" IS NOT NULL
+        ${nftTokenAssociation(context, 'detail')}
         AND NOT EXISTS (
           SELECT 1 FROM "AddressContract" address_registry
           WHERE address_registry."normalizedAddress" = LOWER(detail."toHash")
@@ -179,9 +222,9 @@ export async function getTopNftRedemptions(workspace: number | 'all') {
   }))
 }
 
-export async function getTopNftBurns(workspace: number | 'all') {
+export async function getTopNftBurns(workspace: number | 'all', tokenAddress: string, range: ReportDateRange) {
   if (workspace === 'all') return []
-  const context = await reportContext(workspace)
+  const context = await reportContext(workspace, tokenAddress)
   if (context.nftAddresses.length === 0) return []
   const rows = await prisma.$queryRaw<TopNftRow[]>(Prisma.sql`
     WITH burned_instances AS (
@@ -191,8 +234,10 @@ export async function getTopNftBurns(workspace: number | 'all') {
       FROM "RedemptionTransactionDetail" detail
       WHERE LOWER(detail."tokenAddress") = ANY(${addressArray(context.nftAddresses)})
         AND LOWER(detail."toHash") = ANY(${addressArray(context.zeroAddresses)})
-        AND detail."timestamp" >= ${context.historyStart}
+        AND detail."timestamp" >= ${range.start}
+        AND detail."timestamp" < ${range.end}
         AND detail."tokenId" IS NOT NULL
+        ${nftTokenAssociation(context, 'detail')}
         AND NOT EXISTS (
           SELECT 1 FROM "AddressContract" address_registry
           WHERE address_registry."normalizedAddress" = LOWER(detail."fromHash")
@@ -227,38 +272,34 @@ export async function getNftRedemptionTransactions(
   page: number,
   limit: number,
   search = '',
+  tokenAddress: string,
+  range: ReportDateRange,
 ) {
-  const context = await reportContext(workspace)
-  const where: Prisma.RedemptionTransactionDetailWhereInput = {
-    tokenAddress: { in: context.nftAddresses, mode: 'insensitive' },
-    timestamp: { gte: context.historyStart },
-    ...(search ? {
-      OR: [
-        { txId: { contains: search, mode: 'insensitive' } },
-        { fromHash: { contains: search, mode: 'insensitive' } },
-        { toHash: { contains: search, mode: 'insensitive' } },
-        { tokenId: { contains: search, mode: 'insensitive' } },
-        { tokenName: { contains: search, mode: 'insensitive' } },
-      ],
-    } : {}),
-  }
-  const [items, total, addressRegistry, tokenRegistry] = await Promise.all([
-    prisma.redemptionTransactionDetail.findMany({
-      where,
-      orderBy: [{ timestamp: 'desc' }, { key: 'desc' }],
-      skip: (page - 1) * limit,
-      take: limit,
-      include: { header: { select: { status: true } } },
-    }),
-    prisma.redemptionTransactionDetail.count({ where }),
+  const context = await reportContext(workspace, tokenAddress)
+  const pattern = `%${search.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`
+  const searchSql = search ? Prisma.sql`AND (detail."txId" ILIKE ${pattern} ESCAPE '\\' OR detail."fromHash" ILIKE ${pattern} ESCAPE '\\' OR detail."toHash" ILIKE ${pattern} ESCAPE '\\' OR COALESCE(detail."tokenId",'') ILIKE ${pattern} ESCAPE '\\' OR detail."tokenName" ILIKE ${pattern} ESCAPE '\\')` : Prisma.empty
+  const scopeSql = Prisma.sql`
+    LOWER(detail."tokenAddress")=ANY(${addressArray(context.nftAddresses)})
+    AND detail."timestamp">=${range.start} AND detail."timestamp"<${range.end}
+    ${nftTokenAssociation(context, 'detail')} ${searchSql}`
+  const offset = (page - 1) * limit
+  const [items, countRows, addressRegistry, tokenRegistry] = await Promise.all([
+    prisma.$queryRaw<NftTransactionSqlRow[]>(Prisma.sql`
+      SELECT detail.id,detail.key,detail."txId" tx_id,detail."timestamp",detail."fromHash" from_hash,detail."toHash" to_hash,
+        LOWER(detail."tokenAddress") token_address,detail."tokenName" token_name,detail."tokenSymbol" token_symbol,detail."tokenId" token_id,header.status
+      FROM "RedemptionTransactionDetail" detail JOIN "RedemptionTransactionHeader" header USING("txId")
+      WHERE ${scopeSql} ORDER BY detail."timestamp" DESC,detail.key DESC OFFSET ${offset} LIMIT ${limit}
+    `),
+    prisma.$queryRaw<CountRow[]>(Prisma.sql`SELECT COUNT(*)::bigint total FROM "RedemptionTransactionDetail" detail WHERE ${scopeSql}`),
     prisma.addressContract.findMany({ select: { normalizedAddress: true, name: true } }),
     prisma.tokenContract.findMany({ select: { normalizedAddress: true, name: true } }),
   ])
+  const total = Number(countRows[0]?.total ?? BigInt(0))
   const names = new Map<string, string>([
     ...addressRegistry.map((entry) => [entry.normalizedAddress, entry.name] as const),
     ...tokenRegistry.map((entry) => [entry.normalizedAddress, entry.name] as const),
   ])
-  const tokenIds = Array.from(new Set(items.flatMap((item) => item.tokenId ? [item.tokenId] : [])))
+  const tokenIds = Array.from(new Set(items.flatMap((item) => item.token_id ? [item.token_id] : [])))
   const nftInstances = tokenIds.length === 0 ? [] : await prisma.nFTInstance.findMany({
     where: { normalizedTokenAddress: { in: context.nftAddresses }, id: { in: tokenIds } },
     select: { normalizedTokenAddress: true, id: true, name: true, tokenValue: true },
@@ -270,19 +311,19 @@ export async function getNftRedemptionTransactions(
   return {
     rows: items.map((item) => ({
       id: item.id,
-      txId: item.txId,
+      txId: item.tx_id,
       timestamp: item.timestamp.toISOString(),
-      type: zero.has(normalizeAddress(item.fromHash)) ? 'Mint' : zero.has(normalizeAddress(item.toHash)) ? 'Burn' : 'Transfer',
-      status: item.header.status,
-      tokenName: item.tokenId ? nftNames.get(`${normalizeAddress(item.tokenAddress)}:${item.tokenId}`) ?? item.tokenName : item.tokenName,
-      tokenSymbol: item.tokenSymbol,
-      tokenId: item.tokenId,
-      tokenValue: item.tokenId ? nftValues.get(`${normalizeAddress(item.tokenAddress)}:${item.tokenId}`) ?? null : null,
-      imageUrl: item.tokenId ? nftArtworkUrl(workspace, item.tokenAddress, item.tokenId) : null,
-      fromHash: item.fromHash,
-      fromName: names.get(normalizeAddress(item.fromHash)) ?? null,
-      toHash: item.toHash,
-      toName: names.get(normalizeAddress(item.toHash)) ?? null,
+      type: zero.has(normalizeAddress(item.from_hash)) ? 'Mint' : zero.has(normalizeAddress(item.to_hash)) ? 'Burn' : 'Transfer',
+      status: item.status,
+      tokenName: item.token_id ? nftNames.get(`${item.token_address}:${item.token_id}`) ?? item.token_name : item.token_name,
+      tokenSymbol: item.token_symbol,
+      tokenId: item.token_id,
+      tokenValue: item.token_id ? nftValues.get(`${item.token_address}:${item.token_id}`) ?? null : null,
+      imageUrl: item.token_id ? nftArtworkUrl(workspace, item.token_address, item.token_id) : null,
+      fromHash: item.from_hash,
+      fromName: names.get(normalizeAddress(item.from_hash)) ?? null,
+      toHash: item.to_hash,
+      toName: names.get(normalizeAddress(item.to_hash)) ?? null,
     })),
     total,
     totalPages: Math.max(1, Math.ceil(total / limit)),

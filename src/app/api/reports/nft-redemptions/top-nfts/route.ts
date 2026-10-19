@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { canAccessChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
-import { getTopNftRedemptions } from '@/lib/reporting/nftRedemptionsAnalysis'
+import { getTopNftRedemptions, InvalidReportTokenError } from '@/lib/reporting/nftRedemptionsAnalysis'
+import { parseReportDateRange, ReportPeriodError } from '@/lib/reporting/reportPeriod'
 import { isSelectableReportWorkspace, parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -12,8 +13,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!await isSelectableReportWorkspace(workspace)) return NextResponse.json({ error: 'Select one workspace' }, { status: 400 })
   if (!canAccessWorkspace(admin, workspace)) return NextResponse.json({ error: 'Workspace access denied' }, { status: 403 })
   try {
-    return NextResponse.json({ rows: await getTopNftRedemptions(workspace) })
+    const token = request.nextUrl.searchParams.get('token') ?? ''
+    return NextResponse.json({ rows: await getTopNftRedemptions(workspace, token, await parseReportDateRange(request.nextUrl.searchParams)) })
   } catch (error) {
+    if (error instanceof ReportPeriodError || error instanceof InvalidReportTokenError) return NextResponse.json({ error: error.message }, { status: 400 })
     console.error('Top NFT redemptions error:', error)
     return NextResponse.json({ error: 'Unable to load NFT rankings' }, { status: 500 })
   }
