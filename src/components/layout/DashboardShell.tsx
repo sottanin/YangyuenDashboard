@@ -25,13 +25,15 @@ const PAGE_LABELS: Record<string, string> = {
   '/dashboard/point-tokens': 'Point Tokens (KAP-22)',
   '/dashboard/nft-redemptions': 'NFT Redemptions (KAP-721)',
   '/dashboard/roles': 'Roles',
-  '/dashboard/wallet-activity': 'Wallet Activity Report',
+  '/dashboard/wallet-activity': 'Wallet Activity',
   '/dashboard/settings': 'Settings',
   '/dashboard/admin-users': 'Admin Users',
   '/dashboard/workspaces': 'Workspaces',
   '/dashboard/batch-logs': 'Batch Logs',
   '/dashboard/contracts': 'Contracts',
   '/dashboard/nft-instances': 'NFT Instances',
+  '/dashboard/fitivity-data': 'Fitivity Data',
+  '/dashboard/fitivity-overview': 'Fitivity Overview',
 }
 
 export function DashboardShell({ children, admin }: { children: React.ReactNode; admin: AdminProfile }) {

@@ -1,0 +1,7 @@
+ALTER TABLE "NFTInstance"
+ADD COLUMN "type" TEXT,
+ADD COLUMN "detailTH" TEXT,
+ADD COLUMN "conditionTH" TEXT,
+ADD COLUMN "category" TEXT,
+ADD COLUMN "availableDate" TIMESTAMP(3),
+ADD COLUMN "expiredDate" TIMESTAMP(3);

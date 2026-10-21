@@ -14,14 +14,13 @@ interface Props {
   secondaryAxisLabel?: string
   primaryTooltipUnit?: string
   secondaryTooltipUnit?: string
-}
-
-function formatTooltipCount(value: number): string {
-  return Math.round(value).toLocaleString('en-US', { maximumFractionDigits: 0 })
-}
-
-function formatTooltipAmount(value: number): string {
-  return value.toLocaleString('en-US', { maximumFractionDigits: 4 })
+  primaryColor?: string
+  secondaryColor?: string
+  primaryFractionDigits?: number
+  secondaryFractionDigits?: number
+  referenceValue?: number
+  referenceLabel?: string
+  referenceUnit?: string
 }
 
 export function DualLineChart({
@@ -33,13 +32,20 @@ export function DualLineChart({
   secondaryAxisLabel = secondaryLabel,
   primaryTooltipUnit = primaryLabel,
   secondaryTooltipUnit = secondaryLabel,
+  primaryColor: primaryColorValue = 'var(--success)',
+  secondaryColor: secondaryColorValue = 'var(--danger)',
+  primaryFractionDigits = 0,
+  secondaryFractionDigits = 4,
+  referenceValue,
+  referenceLabel = 'Period average',
+  referenceUnit = primaryTooltipUnit,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(800)
   const [tooltipWidth, setTooltipWidth] = useState(240)
   const [hovered, setHovered] = useState<number | null>(null)
-  const [primaryColor, secondaryColor] = useResolvedColors(['var(--success)', 'var(--danger)'])
+  const [primaryColor, secondaryColor] = useResolvedColors([primaryColorValue, secondaryColorValue])
   useEffect(() => {
     const element = containerRef.current
     if (!element) return
@@ -59,7 +65,7 @@ export function DualLineChart({
   const left = 58, right = 68, top = 18, bottom = 38
   const innerWidth = Math.max(1, width - left - right)
   const innerHeight = height - top - bottom
-  const primaryMaximum = Math.max(1, ...data.map((point) => point.primary)) * 1.12
+  const primaryMaximum = Math.max(1, referenceValue ?? 0, ...data.map((point) => point.primary)) * 1.12
   const secondaryMaximum = Math.max(1, ...data.map((point) => point.secondary)) * 1.12
   const x = (index: number): number => left + (index / Math.max(1, data.length - 1)) * innerWidth
   const primaryY = (value: number): number => top + innerHeight - (value / primaryMaximum) * innerHeight
@@ -68,7 +74,8 @@ export function DualLineChart({
   const secondaryPath = smoothPath(data.map((point, index) => [x(index), secondaryY(point.secondary)]))
   const primaryTicks = Array.from({ length: 5 }, (_, index) => (primaryMaximum / 4) * index)
   const secondaryTicks = Array.from({ length: 5 }, (_, index) => (secondaryMaximum / 4) * index)
-  const labelStep = Math.max(1, Math.ceil(data.length / 7))
+  const desiredLabels = width < 480 ? 4 : width < 720 ? 5 : 7
+  const labelStep = Math.max(1, Math.ceil(data.length / desiredLabels))
   const hoverPoint = hovered === null ? null : data[hovered]
   const tooltipLeft = hovered === null
     ? 8
@@ -95,8 +102,9 @@ export function DualLineChart({
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-5 text-xs text-muted" aria-hidden="true">
-        <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[rgb(var(--success))]" />{primaryLabel}</span>
-        <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[rgb(var(--danger))]" />{secondaryLabel}</span>
+        <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: primaryColor }} />{primaryLabel}</span>
+        <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: secondaryColor }} />{secondaryLabel}</span>
+        {referenceValue != null ? <span className="flex items-center gap-2"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: primaryColor }} />{referenceLabel}</span> : null}
       </div>
       <div
         ref={containerRef}
@@ -115,6 +123,11 @@ export function DualLineChart({
           {data.map((point, index) => index % labelStep === 0 || index === data.length - 1 ? <text key={point.label} x={x(index)} y={height - 10} textAnchor="middle" fontSize="10.5" fill="rgb(var(--text-faint))">{point.label.slice(5)}</text> : null)}
           <path d={primaryPath} fill="none" stroke={primaryColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
           <path d={secondaryPath} fill="none" stroke={secondaryColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          {referenceValue != null ? <g pointerEvents="none">
+            <line x1={left} x2={width - right} y1={primaryY(referenceValue)} y2={primaryY(referenceValue)} stroke={primaryColor} strokeWidth="2" strokeDasharray="7 5" />
+            <rect x={width - right - 116} y={Math.max(3, primaryY(referenceValue) - 23)} width="114" height="19" rx="6" fill="rgb(var(--surface))" stroke={primaryColor} strokeOpacity="0.8" />
+            <text x={width - right - 59} y={Math.max(16, primaryY(referenceValue) - 10)} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={primaryColor}>{referenceValue.toLocaleString('en-US', { maximumFractionDigits: primaryFractionDigits })} {referenceUnit}</text>
+          </g> : null}
           {hovered !== null && hoverPoint && <g pointerEvents="none">
             <line x1={x(hovered)} x2={x(hovered)} y1={top} y2={top + innerHeight} stroke="rgb(var(--text-muted))" strokeDasharray="3 3" />
             <circle cx={x(hovered)} cy={primaryY(hoverPoint.primary)} r="4" fill={primaryColor} />
@@ -129,16 +142,17 @@ export function DualLineChart({
           <div className="mb-1.5 font-semibold">{hoverPoint.label}</div>
           <div className="flex items-center gap-2 whitespace-nowrap">
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: primaryColor }} aria-hidden="true" />
-            <span>Total <span className="font-mono">{formatTooltipCount(hoverPoint.primary)}</span> {primaryTooltipUnit}</span>
+            <span><span className="font-mono">{hoverPoint.primary.toLocaleString('en-US', { maximumFractionDigits: primaryFractionDigits })}</span> {primaryTooltipUnit}</span>
           </div>
           <div className="mt-1 flex items-center gap-2 whitespace-nowrap">
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: secondaryColor }} aria-hidden="true" />
-            <span>Total <span className="font-mono">{formatTooltipAmount(hoverPoint.secondary)}</span> {secondaryTooltipUnit}</span>
+            <span><span className="font-mono">{hoverPoint.secondary.toLocaleString('en-US', { maximumFractionDigits: secondaryFractionDigits })}</span> {secondaryTooltipUnit}</span>
           </div>
         </div>}
       </div>
       <div className="sr-only">
         <p>{primaryLabel} and {secondaryLabel} by day.</p>
+        {referenceValue != null ? <p>{referenceLabel}: {referenceValue.toLocaleString('en-US', { maximumFractionDigits: primaryFractionDigits })} {primaryTooltipUnit}.</p> : null}
         <ul>
           {data.map((point) => (
             <li key={point.label}>

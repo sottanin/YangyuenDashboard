@@ -6,6 +6,7 @@ import { useWorkspace } from '@/lib/WorkspaceContext'
 interface Workspace {
   id: number
   name: string
+  externalId: string | null
   description: string | null
   _count: { tokenContracts: number; addressContracts: number }
 }
@@ -15,7 +16,7 @@ export default function WorkspacesPage() {
   const [rows, setRows] = useState<Workspace[]>([])
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState<{ open: boolean; row: Workspace | null }>({ open: false, row: null })
-  const [form, setForm] = useState({ name: '', description: '' })
+  const [form, setForm] = useState({ name: '', externalId: '', description: '' })
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<number | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<Workspace | null>(null)
@@ -49,13 +50,13 @@ export default function WorkspacesPage() {
   }, [])
 
   function openAdd() {
-    setForm({ name: '', description: '' })
+    setForm({ name: '', externalId: '', description: '' })
     setError(null)
     setModal({ open: true, row: null })
   }
 
   function openEdit(row: Workspace) {
-    setForm({ name: row.name, description: row.description ?? '' })
+    setForm({ name: row.name, externalId: row.externalId ?? '', description: row.description ?? '' })
     setError(null)
     setModal({ open: true, row })
   }
@@ -147,6 +148,7 @@ export default function WorkspacesPage() {
               <tr className="border-b border-default">
                 <th className="text-left px-5 py-3 text-muted font-medium">Name</th>
                 <th className="text-left px-5 py-3 text-muted font-medium">Description</th>
+                <th className="text-left px-5 py-3 text-muted font-medium">Workspace ID</th>
                 <th className="text-left px-5 py-3 text-muted font-medium">Token Contracts</th>
                 <th className="text-left px-5 py-3 text-muted font-medium">Address Contracts</th>
                 <th className="px-5 py-3 w-24" />
@@ -158,13 +160,14 @@ export default function WorkspacesPage() {
                   <tr key={i} className="border-b border-default">
                     <td className="px-5 py-3"><div className="shimmer h-4 rounded w-32" /></td>
                     <td className="px-5 py-3"><div className="shimmer h-4 rounded w-48" /></td>
+                    <td className="px-5 py-3"><div className="shimmer h-4 rounded w-52" /></td>
                     <td className="px-5 py-3"><div className="shimmer h-4 rounded w-12" /></td>
                     <td className="px-5 py-3"><div className="shimmer h-4 rounded w-12" /></td>
                     <td className="px-5 py-3" />
                   </tr>
                 ))
               ) : rows.length === 0 ? (
-                <tr><td colSpan={5} className="px-5 py-10 text-center text-muted">No workspaces yet</td></tr>
+                <tr><td colSpan={6} className="px-5 py-10 text-center text-muted">No workspaces yet</td></tr>
               ) : rows.map((row) => (
                 <tr key={row.id} className="tbl-row border-b border-default last:border-0">
                   <td className="px-5 py-3 font-medium text-default">
@@ -182,6 +185,7 @@ export default function WorkspacesPage() {
                     </div>
                   </td>
                   <td className="px-5 py-3 text-muted">{row.description || '—'}</td>
+                  <td className="px-5 py-3"><span className="font-mono text-[11px] text-muted">{row.externalId || '—'}</span></td>
                   <td className="px-5 py-3 text-center">
                     <span className="pill" style={{ background: 'rgb(var(--accent) / 0.1)', color: 'rgb(var(--accent))' }}>
                       {row._count.tokenContracts}
@@ -229,6 +233,15 @@ export default function WorkspacesPage() {
               {modal.row ? 'Edit Workspace' : 'Add Workspace'}
             </h2>
             <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-muted mb-1">Workspace ID</label>
+                <input
+                  className="input font-mono text-xs"
+                  value={form.externalId}
+                  onChange={(e) => setForm((f) => ({ ...f, externalId: e.target.value }))}
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                />
+              </div>
               <div>
                 <label className="block text-xs text-muted mb-1">Name <span className="text-red-400">*</span></label>
                 <input

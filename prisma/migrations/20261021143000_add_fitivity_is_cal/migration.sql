@@ -1,0 +1,2 @@
+ALTER TABLE "FitivityData"
+ADD COLUMN "isCal" BOOLEAN NOT NULL DEFAULT true;

@@ -44,6 +44,19 @@ export const CHART_CATALOG: readonly ChartCatalogItem[] = [
   { key: 'nft.top-redemptions', label: 'Top 10 NFT Redemptions', menuKey: 'redemptions' },
   { key: 'nft.top-burns', label: 'Top 10 NFT Burn', menuKey: 'redemptions' },
   { key: 'nft.transaction-history', label: 'Transaction History', menuKey: 'redemptions' },
+  { key: 'fitivity.total-steps', label: 'Total Steps', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.total-calories', label: 'Total Calories Burn', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.total-sleep', label: 'Total Sleep Hour', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.steps-trend', label: 'Average Steps Per Day', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.calories-trend', label: 'Average Calories Burn Per Day', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.sleep-trend', label: 'Average Sleep Hour Per Day', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.top-steps', label: 'Top 10 Users by Steps', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.top-calories', label: 'Top 10 Users by Calories Burn', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.top-sleep', label: 'Top 10 Users by Sleep Hour', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.steps-distribution', label: 'Users by Average Daily Steps', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.calories-distribution', label: 'Users by Average Daily Calories Burn', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.sleep-distribution', label: 'Users by Average Daily Sleep Hour', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.user-summary', label: 'User Summary', menuKey: 'fitivity-overview' },
 ] as const
 
 export const CHART_KEYS = new Set(CHART_CATALOG.map((chart) => chart.key))

@@ -14,6 +14,11 @@ interface WalletBalanceRow { normalized_address: string; balance: Prisma.Decimal
 interface PointTokenPerformanceRow { normalized_address: string; incoming_transfers: Prisma.Decimal | null; outgoing_transfers: Prisma.Decimal | null }
 
 function amount(value: Prisma.Decimal | string | null | undefined): string { return value?.toString() ?? '0' }
+function dayKey(value: Date, timezone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(value)
+  const fields = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${fields.year}-${fields.month}-${fields.day}`
+}
 function addressArray(values: string[]): Prisma.Sql {
   return values.length > 0 ? Prisma.sql`ARRAY[${Prisma.join(values)}]::text[]` : Prisma.sql`ARRAY[]::text[]`
 }
@@ -200,7 +205,7 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
     redemptionFee: redemptionFee.toString(),
     pointTokenLocks,
     reconciliationDelta: reconciliationDelta.toString(), reconciliationMatched: reconciliationDelta.isZero(),
-    daily: days.map((day) => ({ date: day.day instanceof Date ? day.day.toISOString().slice(0, 10) : String(day.day).slice(0, 10), totalTransactions: Number(day.total_transactions), totalAmount: amount(day.total_amount) })), timezone: value.timezone, historyStart: value.historyStart.toISOString(),
+    daily: days.map((day) => ({ date: day.day instanceof Date ? dayKey(day.day, value.timezone) : String(day.day).slice(0, 10), totalTransactions: Number(day.total_transactions), totalAmount: amount(day.total_amount) })), timezone: value.timezone, historyStart: value.historyStart.toISOString(),
   }
 }
 

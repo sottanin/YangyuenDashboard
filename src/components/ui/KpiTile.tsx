@@ -10,10 +10,12 @@ interface KpiTileProps {
   sparkColor?: string
   icon?: string
   iconBg?: string
+  iconColor?: string
   valueTrailing?: ReactNode
+  subLabel?: string
 }
 
-export function KpiTile({ label, value, change, spark, sparkColor = 'var(--accent)', icon, iconBg, valueTrailing }: KpiTileProps) {
+export function KpiTile({ label, value, change, spark, sparkColor = 'var(--accent)', icon, iconBg, iconColor, valueTrailing, subLabel }: KpiTileProps) {
   const positive = (change ?? 0) >= 0
   return (
     <div className="glass rounded-2xl p-5 relative overflow-hidden density-card">
@@ -22,13 +24,14 @@ export function KpiTile({ label, value, change, spark, sparkColor = 'var(--accen
         {icon && (
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: iconBg || 'rgb(var(--accent) / 0.12)', color: 'rgb(var(--accent))' }}
+            style={{ background: iconBg || 'rgb(var(--accent) / 0.12)', color: iconColor || 'rgb(var(--accent))' }}
           >
             <Icon name={icon} size={14} />
           </div>
         )}
       </div>
       <div className="flex min-w-0 items-center gap-2 text-2xl font-semibold tracking-tight text-default"><span className="min-w-0 truncate">{value}</span>{valueTrailing}</div>
+      {subLabel ? <div className="mt-2 text-xs text-muted">{subLabel}</div> : null}
       <div className="flex items-end justify-between mt-3">
         {change != null ? (
           <div className={`pill ${positive ? 'pill-success' : 'pill-danger'}`}>

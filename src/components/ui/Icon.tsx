@@ -25,6 +25,22 @@ export function Icon({ name, size = 16, strokeWidth = 1.75, className = '' }: Ic
       return <svg {...props}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>
     case 'bar':
       return <svg {...props}><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg>
+    case 'coin':
+      return <svg {...props}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M9.5 12h5M12 9.5v5"/></svg>
+    case 'coins':
+      return <svg {...props}><ellipse cx="9" cy="6" rx="6" ry="3"/><path d="M3 6v4c0 1.7 2.7 3 6 3s6-1.3 6-3V6M3 10v4c0 1.7 2.7 3 6 3 1.1 0 2.1-.1 3-.4"/><path d="M12 12.5c.9-.9 2.4-1.5 4-1.5 2.8 0 5 1.3 5 3s-2.2 3-5 3-5-1.3-5-3v4c0 1.7 2.2 3 5 3s5-1.3 5-3v-4"/></svg>
+    case 'nft':
+      return <svg {...props}><path d="M12 2 21 7v10l-9 5-9-5V7l9-5Z"/><path d="M7.5 15V9l3 4V9M13 15V9h4M13 12h3"/></svg>
+    case 'wallet':
+      return <svg {...props}><path d="M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v13H5a2 2 0 0 1-2-2V6Z"/><path d="M3 8h16a2 2 0 0 1 2 2v5h-6a3 3 0 0 1 0-6h6"/><circle cx="15" cy="12" r=".75" fill="currentColor" stroke="none"/></svg>
+    case 'history':
+      return <svg {...props}><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>
+    case 'contract':
+      return <svg {...props}><path d="M6 2h9l4 4v16H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M14 2v5h5M8 12h8M8 16h5"/><path d="m15 19 1.5 1.5L20 17"/></svg>
+    case 'database':
+      return <svg {...props}><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+    case 'workspace':
+      return <svg {...props}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/></svg>
     case 'doc':
       return <svg {...props}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
     case 'cart':
@@ -83,6 +99,10 @@ export function Icon({ name, size = 16, strokeWidth = 1.75, className = '' }: Ic
       return <svg {...props}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
     case 'flame':
       return <svg {...props}><path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 3z"/></svg>
+    case 'steps':
+      return <svg {...props}><path d="M8.5 13.5c-1.7.2-4.1 1-5.2 2.2-1.2 1.3-.3 3.4 1.4 3.5 2.3.2 5.3-1.3 6-3.4.4-1.2-.7-2.5-2.2-2.3Z"/><path d="M15.2 4.7c-1.6.7-3.6 2.3-4.2 3.8-.6 1.6 1 3.2 2.6 2.6 2.2-.8 4.4-3.3 4.2-5.5-.1-1.3-1.2-1.5-2.6-.9Z"/><circle cx="4" cy="12" r="1"/><circle cx="7" cy="10" r="1"/><circle cx="18.7" cy="15.5" r="1"/><circle cx="21" cy="12.5" r="1"/></svg>
+    case 'sleep':
+      return <svg {...props}><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8Z"/><path d="M15.5 7.5h4l-4 4h4"/></svg>
     case 'lock':
       return <svg {...props}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
     case 'copy':

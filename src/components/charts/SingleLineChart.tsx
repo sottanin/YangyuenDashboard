@@ -133,13 +133,16 @@ export function SingleLineChart({
         </g>)}
         {data.map((point, index) => index % labelStep === 0 || index === data.length - 1 ? <text key={point.label} x={x(index)} y={height - 10} textAnchor="middle" fontSize="10.5" fill="rgb(var(--text-faint))">{formatAxisLabel(point.label)}</text> : null)}
         <path d={areaPath} fill={`url(#${gradientId})`} pointerEvents="none" />
-        <line x1={left} x2={width - right} y1={y(average)} y2={y(average)} stroke={lineColor} strokeWidth="1.5" strokeDasharray="7 5" opacity="0.8" />
-        <text x={width - right} y={Math.max(top + 10, y(average) - 6)} textAnchor="end" fontSize="10.5" fill={lineColor}>Avg {formatAverage(average, valueKind)} {averageUnit}</text>
         <path d={path} fill="none" stroke={lineColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
         {data.map((point, index) => point.annotations?.length ? <g key={`annotation-${point.label}`}>
           <line x1={x(index)} x2={x(index)} y1={top + innerHeight - 12} y2={top + innerHeight} stroke={annotationColor} strokeWidth="2" />
           <circle cx={x(index)} cy={top + innerHeight - 14} r="4.5" fill={annotationColor} stroke="rgb(var(--surface))" strokeWidth="2" />
         </g> : null)}
+        <g pointerEvents="none">
+          <line x1={left} x2={width - right} y1={y(average)} y2={y(average)} stroke={lineColor} strokeWidth="2" strokeDasharray="7 5" />
+          <rect x={width - right - 116} y={Math.max(3, y(average) - 23)} width="114" height="19" rx="6" fill="rgb(var(--surface))" stroke={lineColor} strokeOpacity="0.8" />
+          <text x={width - right - 59} y={Math.max(16, y(average) - 10)} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={lineColor}>Avg {formatAverage(average, valueKind)} {averageUnit}</text>
+        </g>
         {hovered !== null && hoverPoint ? <g pointerEvents="none">
           <line x1={x(hovered)} x2={x(hovered)} y1={top} y2={top + innerHeight} stroke="rgb(var(--text-muted))" strokeDasharray="3 3" />
           <circle cx={x(hovered)} cy={y(values[hovered] ?? 0)} r="4" fill={lineColor} />

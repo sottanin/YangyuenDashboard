@@ -8,15 +8,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   const numId = Number.parseInt(id, 10)
   if (!Number.isInteger(numId) || numId <= 0) return NextResponse.json({ error: 'Invalid workspace id' }, { status: 400 })
-  let body: { name?: unknown; description?: unknown }
+  let body: { name?: unknown; externalId?: unknown; description?: unknown }
   try {
-    body = await req.json() as { name?: unknown; description?: unknown }
+    body = await req.json() as { name?: unknown; externalId?: unknown; description?: unknown }
   } catch {
     return NextResponse.json({ error: 'Request body must be valid JSON' }, { status: 400 })
   }
-  const { name, description } = body
-  if (typeof name !== 'string' || !name.trim() || name.trim().length > 100 || (description !== undefined && (typeof description !== 'string' || description.length > 1000))) {
-    return NextResponse.json({ error: 'Name is required (maximum 100 characters); description maximum is 1000 characters' }, { status: 400 })
+  const { name, externalId, description } = body
+  const normalizedExternalId = typeof externalId === 'string' ? externalId.trim().toLowerCase() : ''
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 100 || (normalizedExternalId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalizedExternalId)) || (description !== undefined && (typeof description !== 'string' || description.length > 1000))) {
+    return NextResponse.json({ error: 'Name is required; Workspace ID must be a valid UUID; description maximum is 1000 characters' }, { status: 400 })
   }
   try {
     const existing = await prisma.workspace.findUnique({ where: { id: numId }, select: { name: true } })
@@ -29,11 +30,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     const workspace = await prisma.workspace.update({
       where: { id: numId },
-      data: { name: name.trim(), description: typeof description === 'string' ? description.trim() || null : null },
+      data: { name: name.trim(), externalId: normalizedExternalId || null, description: typeof description === 'string' ? description.trim() || null : null },
     })
     return NextResponse.json(workspace)
   } catch {
-    return NextResponse.json({ error: 'Workspace name already exists' }, { status: 409 })
+    return NextResponse.json({ error: 'Workspace name or Workspace ID already exists' }, { status: 409 })
   }
 }
 

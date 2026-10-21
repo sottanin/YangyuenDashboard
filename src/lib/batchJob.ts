@@ -9,6 +9,7 @@ import {
   type WalletSnapshotBalanceField,
 } from './walletBalances'
 import { readExpiredBalances } from './blockchain/readExpiredBalance'
+import { readNFTContractInstance, readNFTContractReference, readNFTMetadataInstance } from './blockchain/readNFTInstance'
 
 const KUBSCAN_BASE = 'https://www.kubscan.com/api/v2/tokens'
 const KUBSCAN_ADDR = 'https://www.kubscan.com/api/v2/addresses'
@@ -76,26 +77,6 @@ interface KubScanTxResponse {
   gas_used?: number | string
   status?: string
   result?: string
-}
-
-interface NFTAttribute {
-  trait_type: string
-  value: string | number
-}
-
-interface NFTInstanceResponse {
-  id: string
-  is_unique?: boolean
-  metadata?: { image?: string; name?: string; attributes?: NFTAttribute[] }
-  owner?: { hash?: string }
-  token?: { address?: string; value?: string }
-}
-
-function extractOriginalPrice(attrs?: NFTAttribute[]): Prisma.Decimal | null {
-  if (!attrs) return null
-  const trait = attrs.find((a) => a.trait_type === 'Original Price')
-  if (!trait) return null
-  return fromWei(trait.value)
 }
 
 export async function runBatchJob(coordinatorId?: string): Promise<void> {
@@ -555,22 +536,24 @@ export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
 
 async function upsertNFTInstance(contract: RegistryToken, tokenId: string): Promise<void> {
   try {
-    const res = await fetch(`${KUBSCAN_BASE}/${contract.address}/instances/${tokenId}`)
-    if (!res.ok) return
-    const data: NFTInstanceResponse = await res.json()
-    if (data.token?.address && normalizeAddress(data.token.address) !== normalizeAddress(contract.address)) return
-    const tokenValue = extractOriginalPrice(data.metadata?.attributes)
+    const data = await readNFTContractInstance(contract.address, tokenId)
     const normalizedTokenAddress = normalizeAddress(contract.address)
     await prisma.nFTInstance.createMany({
       data: [{
         id: tokenId,
-        isUnique: data.is_unique ?? false,
-        imageUrl: data.metadata?.image ?? null,
-        name: data.metadata?.name || 'Unknown NFT',
-        ownerHash: data.owner?.hash || 'unknown',
+        isUnique: true,
+        imageUrl: data.imageUrl,
+        name: data.name,
+        ownerHash: data.ownerHash,
         tokenAddress: contract.address,
         normalizedTokenAddress,
-        tokenValue: tokenValue ?? null,
+        tokenValue: data.tokenValue,
+        type: data.type,
+        detailTH: data.detailTH,
+        conditionTH: data.conditionTH,
+        category: data.category,
+        availableDate: data.availableDate,
+        expiredDate: data.expiredDate,
         visible: true,
       }],
       skipDuplicates: true,
@@ -578,16 +561,21 @@ async function upsertNFTInstance(contract: RegistryToken, tokenId: string): Prom
     await prisma.nFTInstance.update({
       where: { normalizedTokenAddress_id: { normalizedTokenAddress, id: tokenId } },
       data: {
-        isUnique: data.is_unique ?? false,
-        ownerHash: data.owner?.hash || 'unknown',
+        ownerHash: data.ownerHash,
+        type: data.type,
+        detailTH: data.detailTH,
+        conditionTH: data.conditionTH,
+        category: data.category,
+        availableDate: data.availableDate,
+        expiredDate: data.expiredDate,
       },
     })
     await prisma.nFTInstance.updateMany({
       where: { normalizedTokenAddress, id: tokenId, isNotReplace: false },
       data: {
-        imageUrl: data.metadata?.image ?? null,
-        name: data.metadata?.name || 'Unknown NFT',
-        tokenValue: tokenValue ?? null,
+        imageUrl: data.imageUrl,
+        name: data.name,
+        tokenValue: data.tokenValue,
       },
     })
   } catch {
@@ -854,7 +842,7 @@ export async function runFeeUpdateJob(coordinatorId?: string): Promise<void> {
   }
 }
 
-const NFT_BATCH_SIZE = 10
+const NFT_BATCH_SIZE = 5
 
 export async function runNFTInstanceUpdateJob(coordinatorId?: string): Promise<void> {
   await assertPipelineActive(coordinatorId)
@@ -885,30 +873,34 @@ export async function runNFTInstanceUpdateJob(coordinatorId?: string): Promise<v
         batch.map(async ({ id, tokenAddress, normalizedTokenAddress }) => {
           try {
             if (!isValidAddress(tokenAddress)) throw new Error('Invalid NFT contract address')
-            const res = await fetch(`${KUBSCAN_BASE}/${tokenAddress}/instances/${id}`)
-            if (!res.ok) return
-            const data: NFTInstanceResponse = await res.json()
-            if (data.token?.address && normalizeAddress(data.token.address) !== normalizeAddress(tokenAddress)) {
-              throw new Error('KubScan returned a different NFT contract')
-            }
-            const tokenValue = extractOriginalPrice(data.metadata?.attributes)
+            const reference = await readNFTContractReference(tokenAddress, id)
+            await prisma.nFTInstance.update({
+              where: { normalizedTokenAddress_id: { normalizedTokenAddress, id } },
+              data: { ownerHash: reference.ownerHash },
+            })
+            totalUpdated++
+            const data = await readNFTMetadataInstance(reference)
             await prisma.nFTInstance.update({
               where: { normalizedTokenAddress_id: { normalizedTokenAddress, id } },
               data: {
-                isUnique: data.is_unique ?? false,
-                ownerHash: data.owner?.hash || 'unknown',
+                type: data.type,
+                detailTH: data.detailTH,
+                conditionTH: data.conditionTH,
+                category: data.category,
+                availableDate: data.availableDate,
+                expiredDate: data.expiredDate,
               },
             })
-            const metadataUpdate = await prisma.nFTInstance.updateMany({
+            await prisma.nFTInstance.updateMany({
               where: { normalizedTokenAddress, id, isNotReplace: false },
               data: {
-                imageUrl: data.metadata?.image ?? null,
-                name: data.metadata?.name || 'Unknown NFT',
-                tokenValue: tokenValue ?? null,
+                imageUrl: data.imageUrl,
+                name: data.name,
+                tokenValue: data.tokenValue,
               },
             })
-            totalUpdated += metadataUpdate.count
-          } catch {
+          } catch (error) {
+            console.error(`[NFTInstanceUpdate] Failed ${tokenAddress} #${id}:`, error instanceof Error ? error.message : error)
             errorCount++
           }
         }),

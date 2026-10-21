@@ -311,6 +311,9 @@ export default function Kap22AnalysisPage() {
   function periodStart(end: string): string | null {
     if (period === 'all') return null
     if (period === 'custom') return customFrom || null
+    // Switching tokens clears the previous summary while the next one loads.
+    // Do not construct a Date from the temporarily missing last data point.
+    if (!end) return null
     const date = new Date(`${end}T00:00:00.000Z`)
     if (period === 'week') date.setUTCDate(date.getUTCDate() - 6)
     if (period === 'month') date.setUTCMonth(date.getUTCMonth() - 1)
@@ -405,7 +408,7 @@ export default function Kap22AnalysisPage() {
   return <div className="min-w-0 max-w-full">
     <PageHeader
       title={reportTitle}
-      subtitle="Pool balances, mint and burn activity from the configured business history"
+      subtitle="แสดงยอดคงเหลือใน Pool และกิจกรรม Mint/Burn ตั้งแต่วันเริ่มต้นประวัติธุรกิจที่กำหนด"
       actions={hasVisibleContent ? <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-end sm:justify-end">
         <TokenSelector tokens={tokens} value={selectedToken} disabled={tokensLoading || tokens.length === 0} onChange={(value) => { setPage(1); setSearchInput(''); setSearch(''); setSelectedToken(value) }} />
         {(canViewDailyCharts || canViewHeatmap) && <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-muted sm:w-36" htmlFor="kap22-period">Period

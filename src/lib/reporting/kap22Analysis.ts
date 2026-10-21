@@ -273,7 +273,7 @@ export async function getKap22Summary(tokenAddress: string, workspaceSelection: 
   ])
 
   const dailyMap = new Map(dailyRows.map((row) => {
-    const key = row.day instanceof Date ? row.day.toISOString().slice(0, 10) : String(row.day).slice(0, 10)
+    const key = row.day instanceof Date ? dayKey(row.day, context.timezone) : String(row.day).slice(0, 10)
     return [key, {
       totalTransactions: Number(row.total_transactions),
       totalAmount: decimalString(row.total_amount),

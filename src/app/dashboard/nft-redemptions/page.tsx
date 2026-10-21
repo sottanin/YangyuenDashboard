@@ -177,7 +177,7 @@ export default function NftRedemptionsPage(): React.JSX.Element {
   }, [canViewHistory, customError, workspaceLoading, page, search, loadTransactions, selectedToken, tokenWorkspace, workspace])
 
   return <div className="min-w-0 max-w-full">
-    <PageHeader title="NFT Redemptions (KAP-721)" subtitle="NFT mint, burn, redemption payments and marketplace fees" actions={hasVisibleContent ? <ReportFilters idPrefix="nft-redemptions" tokens={tokens} token={selectedToken} period={period} customFrom={customFrom} customTo={customTo} disabled={tokensLoading} minDate={historyStart} maxDate={today} onTokenChange={(value) => { setSelectedToken(value); setPage(1) }} onPeriodChange={(value) => { setPeriod(value); setPage(1) }} onCustomFromChange={(value) => { setCustomFrom(value); setPage(1) }} onCustomToChange={(value) => { setCustomTo(value); setPage(1) }} /> : undefined} />
+    <PageHeader title="NFT Redemptions (KAP-721)" subtitle="ภาพรวมการสร้าง การใช้งาน NFT ยอดชำระ และค่าธรรมเนียม Marketplace" actions={hasVisibleContent ? <ReportFilters idPrefix="nft-redemptions" tokens={tokens} token={selectedToken} period={period} customFrom={customFrom} customTo={customTo} disabled={tokensLoading} minDate={historyStart} maxDate={today} onTokenChange={(value) => { setSelectedToken(value); setPage(1) }} onPeriodChange={(value) => { setPeriod(value); setPage(1) }} onCustomFromChange={(value) => { setCustomFrom(value); setPage(1) }} onCustomToChange={(value) => { setCustomTo(value); setPage(1) }} /> : undefined} />
 
     {tokensError ? <div className="mb-4"><ErrorCard message={tokensError} onRetry={() => void loadTokens()} /></div> : null}
     {customError ? <div className="mb-4" role="alert"><ErrorCard message={customError} /></div> : null}
