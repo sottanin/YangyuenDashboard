@@ -31,6 +31,8 @@ export function Icon({ name, size = 16, strokeWidth = 1.75, className = '' }: Ic
       return <svg {...props}><ellipse cx="9" cy="6" rx="6" ry="3"/><path d="M3 6v4c0 1.7 2.7 3 6 3s6-1.3 6-3V6M3 10v4c0 1.7 2.7 3 6 3 1.1 0 2.1-.1 3-.4"/><path d="M12 12.5c.9-.9 2.4-1.5 4-1.5 2.8 0 5 1.3 5 3s-2.2 3-5 3-5-1.3-5-3v4c0 1.7 2.2 3 5 3s5-1.3 5-3v-4"/></svg>
     case 'nft':
       return <svg {...props}><path d="M12 2 21 7v10l-9 5-9-5V7l9-5Z"/><path d="M7.5 15V9l3 4V9M13 15V9h4M13 12h3"/></svg>
+    case 'ticket':
+      return <svg {...props}><path d="M3 7a2 2 0 0 0 2-2h14a2 2 0 0 0 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 0-2 2H5a2 2 0 0 0-2-2v-3a2 2 0 0 0 0-4V7Z"/><path d="M13 7v2M13 11v2M13 15v2"/><path d="M7 9.5h3M7 14.5h3"/></svg>
     case 'wallet':
       return <svg {...props}><path d="M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v13H5a2 2 0 0 1-2-2V6Z"/><path d="M3 8h16a2 2 0 0 1 2 2v5h-6a3 3 0 0 1 0-6h6"/><circle cx="15" cy="12" r=".75" fill="currentColor" stroke="none"/></svg>
     case 'history':

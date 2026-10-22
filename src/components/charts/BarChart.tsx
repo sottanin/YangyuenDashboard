@@ -17,6 +17,7 @@ interface BarChartProps {
   height?: number
   valueKey?: string
   labelKey?: string
+  axisLabelKey?: string
   color?: string
   stacked?: boolean
   keys?: BarKey[]
@@ -31,6 +32,7 @@ export function BarChart({
   height = 240,
   valueKey = 'value',
   labelKey = 'label',
+  axisLabelKey,
   color = 'var(--accent)',
   stacked = false,
   keys,
@@ -176,7 +178,7 @@ export function BarChart({
                 )
               })}
               <text x={cx} y={height - 10} textAnchor="middle" fontSize="10.5" fill="rgb(var(--text-faint))">
-                {String(d[labelKey] || '')}
+                {String(d[axisLabelKey ?? labelKey] || '')}
               </text>
             </g>
           )

@@ -44,6 +44,8 @@ export const CHART_CATALOG: readonly ChartCatalogItem[] = [
   { key: 'nft.top-redemptions', label: 'Top 10 NFT Redemptions', menuKey: 'redemptions' },
   { key: 'nft.top-burns', label: 'Top 10 NFT Burn', menuKey: 'redemptions' },
   { key: 'nft.transaction-history', label: 'Transaction History', menuKey: 'redemptions' },
+  { key: 'nft-vouchers.purchase-redeem', label: 'NFT Voucher Activity', menuKey: 'nft-vouchers' },
+  { key: 'nft-vouchers.voucher-list', label: 'NFT Voucher Cards', menuKey: 'nft-vouchers' },
   { key: 'fitivity.total-steps', label: 'Total Steps', menuKey: 'fitivity-overview' },
   { key: 'fitivity.total-calories', label: 'Total Calories Burn', menuKey: 'fitivity-overview' },
   { key: 'fitivity.total-sleep', label: 'Total Sleep Hour', menuKey: 'fitivity-overview' },
