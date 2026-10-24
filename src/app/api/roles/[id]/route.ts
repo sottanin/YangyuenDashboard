@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentAdmin, isSuperAdmin } from '@/lib/auth/admin'
 import { MENU_CATALOG } from '@/lib/auth/menuCatalog'
-import { CHART_CATALOG, CHART_KEYS, chartKeysForMenu } from '@/lib/auth/chartCatalog'
+import { CHART_CATALOG, CHART_KEYS, chartKeysForMenu, expandChartKeys, LEGACY_CHART_GROUPS } from '@/lib/auth/chartCatalog'
 import { prisma } from '@/lib/prisma'
 
 interface RouteContext { params: Promise<{ id: string }> }
@@ -12,7 +12,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext): Promi
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!isSuperAdmin(admin)) return NextResponse.json({ error: 'Only superadmin can manage roles' }, { status: 403 })
   const { id } = await params
-  const current = await prisma.adminRole.findUnique({ where: { id } })
+  const current = await prisma.adminRole.findUnique({ where: { id }, include: { chartPermissions: { select: { chartKey: true } } } })
   if (!current) return NextResponse.json({ error: 'Role not found' }, { status: 404 })
   // Protect the immutable privilege boundary by the persisted system flag,
   // rather than by a mutable display name. This also protects any future
@@ -34,9 +34,13 @@ export async function PUT(request: NextRequest, { params }: RouteContext): Promi
   if (source.chartKeys !== undefined && (!Array.isArray(source.chartKeys) || !source.chartKeys.every((key) => typeof key === 'string'))) return NextResponse.json({ error: 'Invalid chart permission' }, { status: 400 })
   if (Array.isArray(source.chartKeys) && new Set(source.chartKeys).size !== source.chartKeys.length) return NextResponse.json({ error: 'Duplicate chart permission' }, { status: 400 })
   const submittedCharts = source.chartKeys === undefined ? permissions.flatMap(chartKeysForMenu) : Array.from(new Set(source.chartKeys as string[]))
-  if (!submittedCharts.every((key) => CHART_KEYS.has(key))) return NextResponse.json({ error: 'Invalid chart permission' }, { status: 400 })
-  const permittedCharts = submittedCharts.filter((key) => CHART_CATALOG.some((chart) => chart.key === key && permissions.includes(chart.menuKey)))
-  if (permittedCharts.length !== submittedCharts.length) return NextResponse.json({ error: 'Chart permission requires its parent menu' }, { status: 400 })
+  // A stale role editor may still submit a grouped grant already held by this
+  // role. Accept only those persisted aliases, then replace them atomically.
+  const persistedKeys = new Set(current.chartPermissions.map((permission) => permission.chartKey))
+  if (!submittedCharts.every((key) => CHART_KEYS.has(key) || (Object.hasOwn(LEGACY_CHART_GROUPS, key) && persistedKeys.has(key)))) return NextResponse.json({ error: 'Invalid chart permission' }, { status: 400 })
+  const normalizedCharts = expandChartKeys(submittedCharts)
+  const permittedCharts = normalizedCharts.filter((key) => CHART_CATALOG.some((chart) => chart.key === key && permissions.includes(chart.menuKey)))
+  if (permittedCharts.length !== normalizedCharts.length) return NextResponse.json({ error: 'Chart permission requires its parent menu' }, { status: 400 })
   const role = await prisma.$transaction(async (tx) => {
     await tx.roleMenuPermission.deleteMany({ where: { roleId: id } })
     await tx.roleChartPermission.deleteMany({ where: { roleId: id } })

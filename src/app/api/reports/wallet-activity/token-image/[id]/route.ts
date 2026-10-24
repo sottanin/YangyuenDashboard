@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
+import { canAccessAnyChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
 import { prisma } from '@/lib/prisma'
 import { isSelectableReportWorkspace, parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
 import { detectTokenImageType, readTokenImage } from '@/lib/system/tokenImages'
@@ -15,7 +15,11 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
   if (!canAccessWorkspace(admin, workspace)) return new NextResponse(null, { status: 403 })
   const { id } = await params
   if (!id || id.length > 64) return new NextResponse(null, { status: 400 })
-  const token = await prisma.tokenContract.findFirst({ where: { id, workspaceId: workspace }, select: { imageKey: true } })
+  const token = await prisma.tokenContract.findFirst({ where: { id, workspaceId: workspace }, select: { imageKey: true, standard: true } })
+  const imageCharts = token?.standard?.toUpperCase() === 'KAP-22'
+    ? ['wallet-activity.point-token-activity', 'wallet-activity.point-token-balance', 'wallet-activity.transaction-history']
+    : ['wallet-activity.token-activity', 'wallet-activity.token-balance', 'wallet-activity.transaction-history']
+  if (!canAccessAnyChart(admin, imageCharts)) return new NextResponse(null, { status: 403 })
   if (!token?.imageKey) return new NextResponse(null, { status: 404 })
   try {
     const bytes = await readTokenImage(token.imageKey)

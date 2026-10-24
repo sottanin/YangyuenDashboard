@@ -53,7 +53,8 @@ export function RankedMetricBarChart({ data, unit, color, ariaLabel, maximumFrac
         const y = 8 + index * rowHeight + rowHeight * 0.18
         const barHeight = rowHeight * 0.64
         const barWidth = values[index] / maximum * innerWidth
-        return <g key={point.label} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} opacity={hovered !== null && hovered !== index ? 0.52 : 1}>
+        return <g key={`${index}:${point.label}`} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} opacity={hovered !== null && hovered !== index ? 0.52 : 1}>
+          <title>{point.label}</title>
           <RankMarker index={index} y={y + barHeight / 2 + 4} />
           <text x="25" y={y + barHeight / 2 + 4} fontSize="10.5" fill="rgb(var(--text-muted))">{point.label.length > 19 ? `${point.label.slice(0, 10)}…${point.label.slice(-6)}` : point.label}</text>
           <rect x={left} y={y} width={innerWidth} height={barHeight} rx="5" fill="rgb(var(--grid))" opacity="0.25" />
@@ -62,6 +63,6 @@ export function RankedMetricBarChart({ data, unit, color, ariaLabel, maximumFrac
         </g>
       })}
     </svg>
-    <div className="sr-only"><ol>{data.map((point, index) => <li key={point.label}>Rank {index + 1}, {point.label}: {formatValue(point.value, maximumFractionDigits)} {unit}</li>)}</ol></div>
+    <div className="sr-only"><ol>{data.map((point, index) => <li key={`${index}:${point.label}`}>Rank {index + 1}, {point.label}: {formatValue(point.value, maximumFractionDigits)} {unit}</li>)}</ol></div>
   </div>
 }

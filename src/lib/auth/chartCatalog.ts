@@ -52,14 +52,43 @@ export const CHART_CATALOG: readonly ChartCatalogItem[] = [
   { key: 'fitivity.steps-trend', label: 'Average Steps Per Day', menuKey: 'fitivity-overview' },
   { key: 'fitivity.calories-trend', label: 'Average Calories Burn Per Day', menuKey: 'fitivity-overview' },
   { key: 'fitivity.sleep-trend', label: 'Average Sleep Hour Per Day', menuKey: 'fitivity-overview' },
-  { key: 'fitivity.top-steps', label: 'Top 10 Users by Steps', menuKey: 'fitivity-overview' },
-  { key: 'fitivity.top-calories', label: 'Top 10 Users by Calories Burn', menuKey: 'fitivity-overview' },
-  { key: 'fitivity.top-sleep', label: 'Top 10 Users by Sleep Hour', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.top-steps', label: 'Top 10 by Steps', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.top-calories', label: 'Top 10 by Calories Burn', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.top-sleep', label: 'Top 10 by Sleep Hour', menuKey: 'fitivity-overview' },
   { key: 'fitivity.steps-distribution', label: 'Users by Average Daily Steps', menuKey: 'fitivity-overview' },
   { key: 'fitivity.calories-distribution', label: 'Users by Average Daily Calories Burn', menuKey: 'fitivity-overview' },
   { key: 'fitivity.sleep-distribution', label: 'Users by Average Daily Sleep Hour', menuKey: 'fitivity-overview' },
-  { key: 'fitivity.user-summary', label: 'User Summary', menuKey: 'fitivity-overview' },
+  { key: 'fitivity.user-summary', label: 'Wallet Summary', menuKey: 'fitivity-overview' },
+  { key: 'wallet-activity.total-transactions', label: 'Total Transactions', menuKey: 'wallets' },
+  { key: 'wallet-activity.token-activity', label: 'Token Activity', menuKey: 'wallets' },
+  { key: 'wallet-activity.point-token-activity', label: 'Point Token Activity', menuKey: 'wallets' },
+  { key: 'wallet-activity.nft-activity', label: 'NFT Activity', menuKey: 'wallets' },
+  { key: 'wallet-activity.token-balance', label: 'Token Balance', menuKey: 'wallets' },
+  { key: 'wallet-activity.point-token-balance', label: 'Point Token Balance', menuKey: 'wallets' },
+  { key: 'wallet-activity.steps-trend', label: 'Average Steps Per Day', menuKey: 'wallets' },
+  { key: 'wallet-activity.calories-trend', label: 'Average Calories Burn Per Day', menuKey: 'wallets' },
+  { key: 'wallet-activity.sleep-trend', label: 'Average Sleep Hour Per Day', menuKey: 'wallets' },
+  { key: 'wallet-activity.transaction-history', label: 'Transaction History', menuKey: 'wallets' },
+  { key: 'wallet-activity.redemption-history', label: 'Redemption History', menuKey: 'wallets' },
+  { key: 'wallet-activity.fitivity-history', label: 'Fitivity History', menuKey: 'wallets' },
 ] as const
 
 export const CHART_KEYS = new Set(CHART_CATALOG.map((chart) => chart.key))
 export function chartKeysForMenu(menuKey: string): string[] { return CHART_CATALOG.filter((chart) => chart.menuKey === menuKey).map((chart) => chart.key) }
+
+// Compatibility for the earlier grouped Wallet Activity grants. Expand only
+// these known groups; unknown permission names must never become grants.
+export const LEGACY_CHART_GROUPS: Readonly<Record<string, readonly string[]>> = {
+  'wallet-activity.summary': [
+    'wallet-activity.total-transactions', 'wallet-activity.token-activity',
+    'wallet-activity.point-token-activity', 'wallet-activity.nft-activity',
+    'wallet-activity.token-balance', 'wallet-activity.point-token-balance',
+  ],
+  'wallet-activity.fitivity-trends': [
+    'wallet-activity.steps-trend', 'wallet-activity.calories-trend', 'wallet-activity.sleep-trend',
+  ],
+}
+
+export function expandChartKeys(keys: readonly string[]): string[] {
+  return Array.from(new Set(keys.flatMap((key) => Object.hasOwn(LEGACY_CHART_GROUPS, key) ? LEGACY_CHART_GROUPS[key] : [key])))
+}

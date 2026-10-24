@@ -16,7 +16,7 @@ import { useWorkspace } from '@/lib/WorkspaceContext'
 
 interface KpiMetric { total: string; average: string; users: number }
 interface TrendPoint { date: string; average: string; accumulated: string }
-interface UserSummaryRow { userId: string; totalSteps: string; averageSteps: string; totalCalories: string; averageCalories: string; totalSleep: string; averageSleep: string }
+interface UserSummaryRow { userId: string; walletAddress: string; totalSteps: string; averageSteps: string; totalCalories: string; averageCalories: string; totalSleep: string; averageSleep: string }
 interface Report {
   workspace: { id: number; name: string }
   period: { from: string; to: string; historyStart: string; today: string }
@@ -120,9 +120,9 @@ export function FitivityOverviewDashboard(): React.JSX.Element {
         {visible.sleepDistribution ? <DistributionCard title="Users by Average Daily Sleep Hour" data={report.distributions.sleep} color="var(--accent)" /> : null}
       </section>
       <section className="grid gap-4 xl:grid-cols-3" aria-label="Top Fitivity users">
-        {visible.topSteps ? <RankCard title="Top 10 Users by Steps" data={report.topUsers.steps} unit="steps" color="var(--success)" digits={0} /> : null}
-        {visible.topCalories ? <RankCard title="Top 10 Users by Calories Burn" data={report.topUsers.calories} unit="kcal" color="var(--warn)" digits={2} /> : null}
-        {visible.topSleep ? <RankCard title="Top 10 Users by Sleep Hour" data={report.topUsers.sleep} unit="hours" color="var(--accent)" digits={2} /> : null}
+        {visible.topSteps ? <RankCard title="Top 10 by Steps" data={report.topUsers.steps} unit="steps" color="var(--success)" digits={0} /> : null}
+        {visible.topCalories ? <RankCard title="Top 10 by Calories Burn" data={report.topUsers.calories} unit="kcal" color="var(--warn)" digits={2} /> : null}
+        {visible.topSleep ? <RankCard title="Top 10 by Sleep Hour" data={report.topUsers.sleep} unit="hours" color="var(--accent)" digits={2} /> : null}
       </section>
       {visible.userSummary ? <UserSummaryTable rows={report.userSummary} /> : null}
     </> : null}
@@ -145,10 +145,10 @@ function RankCard({ title, data, unit, color, digits }: { title: string; data: R
   return <Card title={title} subtitle="จัดอันดับผู้ใช้งานตามผลรวมในช่วงเวลาที่เลือก">{data.length ? <RankedMetricBarChart data={data} unit={unit} color={color} ariaLabel={title} maximumFractionDigits={digits} /> : <Empty label="ไม่พบข้อมูลผู้ใช้งานในช่วงเวลานี้" />}</Card>
 }
 
-type SummarySortKey = keyof UserSummaryRow
+type SummarySortKey = Exclude<keyof UserSummaryRow, 'userId'>
 
 const summaryColumns: Array<{ key: SummarySortKey; label: string; unit?: string; digits: number }> = [
-  { key: 'userId', label: 'User ID', digits: 0 },
+  { key: 'walletAddress', label: 'Wallet Address', digits: 0 },
   { key: 'totalSteps', label: 'Total Steps', unit: 'steps', digits: 0 },
   { key: 'averageSteps', label: 'Avg. Steps / Day', unit: 'steps', digits: 0 },
   { key: 'totalCalories', label: 'Total Calories Burn', unit: 'kcal', digits: 2 },
@@ -158,28 +158,33 @@ const summaryColumns: Array<{ key: SummarySortKey; label: string; unit?: string;
 ]
 
 function UserSummaryTable({ rows }: { rows: UserSummaryRow[] }): React.JSX.Element {
-  const [sortKey, setSortKey] = useState<SummarySortKey>('userId')
+  const [sortKey, setSortKey] = useState<SummarySortKey>('walletAddress')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const sortedRows = useMemo(() => [...rows].sort((left, right) => {
-    const comparison = sortKey === 'userId'
-      ? left.userId.localeCompare(right.userId, undefined, { numeric: true, sensitivity: 'base' })
+    if (sortKey === 'walletAddress') {
+      const leftMapped = /^0x[0-9a-f]{40}/i.test(left.walletAddress)
+      const rightMapped = /^0x[0-9a-f]{40}/i.test(right.walletAddress)
+      if (leftMapped !== rightMapped) return leftMapped ? -1 : 1
+    }
+    const comparison = sortKey === 'walletAddress'
+      ? left.walletAddress.localeCompare(right.walletAddress, undefined, { numeric: true, sensitivity: 'base' })
       : compareDecimalStrings(left[sortKey], right[sortKey])
     return sortDirection === 'asc' ? comparison : -comparison
   }), [rows, sortDirection, sortKey])
   const changeSort = (key: SummarySortKey): void => {
     if (key === sortKey) setSortDirection((value) => value === 'asc' ? 'desc' : 'asc')
-    else { setSortKey(key); setSortDirection(key === 'userId' ? 'asc' : 'desc') }
+    else { setSortKey(key); setSortDirection(key === 'walletAddress' ? 'asc' : 'desc') }
   }
-  return <Card className="mt-4" title="User Summary" subtitle={`สรุปข้อมูลผู้ใช้งาน ${rows.length.toLocaleString()} คนในช่วงเวลาที่เลือก`} noPad>
+  return <Card className="mt-4" title="Wallet Summary" subtitle={`สรุปข้อมูลผู้ใช้งาน ${rows.length.toLocaleString()} คนในช่วงเวลาที่เลือก`} noPad>
     {rows.length === 0 ? <div className="py-16 text-center text-sm text-muted">ไม่พบข้อมูลผู้ใช้งานในช่วงเวลานี้</div> : <div className="max-h-[620px] overflow-auto thin-scroll">
       <table className="min-w-[1120px] w-full text-sm">
         <thead className="sticky top-0 z-10 bg-[rgb(var(--surface))]"><tr className="border-b border-default text-[10.5px] uppercase tracking-wider text-faint">
-          {summaryColumns.map((column) => <th key={column.key} className={`px-4 py-3 font-medium ${column.key === 'userId' ? 'text-left' : 'text-right'}`} aria-sort={sortKey === column.key ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
-            <button type="button" className={`inline-flex w-full min-h-8 items-center gap-1 hover:text-default ${column.key === 'userId' ? 'justify-start' : 'justify-end'}`} onClick={() => changeSort(column.key)}>{column.label}<span aria-hidden="true">{sortKey === column.key ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}</span></button>
+          {summaryColumns.map((column) => <th key={column.key} className={`px-4 py-3 font-medium ${column.key === 'walletAddress' ? 'text-left' : 'text-right'}`} aria-sort={sortKey === column.key ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+            <button type="button" className={`inline-flex w-full min-h-8 items-center gap-1 hover:text-default ${column.key === 'walletAddress' ? 'justify-start' : 'justify-end'}`} onClick={() => changeSort(column.key)}>{column.label}<span aria-hidden="true">{sortKey === column.key ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}</span></button>
           </th>)}
         </tr></thead>
         <tbody>{sortedRows.map((row) => <tr key={row.userId} className="tbl-row border-b border-default last:border-0">
-          {summaryColumns.map((column) => <td key={column.key} className={`whitespace-nowrap px-4 py-3 ${column.key === 'userId' ? 'font-mono text-left text-xs text-default' : 'text-right font-mono text-xs text-muted'}`}>{column.key === 'userId' ? row.userId : `${format(row[column.key], column.digits)} ${column.unit}`}</td>)}
+          {summaryColumns.map((column) => <td key={column.key} className={`whitespace-nowrap px-4 py-3 ${column.key === 'walletAddress' ? 'max-w-[300px] whitespace-normal break-all font-mono text-left text-xs text-default' : 'text-right font-mono text-xs text-muted'}`}>{column.key === 'walletAddress' ? row.walletAddress : `${format(row[column.key], column.digits)} ${column.unit}`}</td>)}
         </tr>)}</tbody>
       </table>
     </div>}

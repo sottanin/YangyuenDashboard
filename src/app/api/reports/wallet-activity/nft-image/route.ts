@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
+import { canAccessChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
 import { prisma } from '@/lib/prisma'
 import { isSelectableReportWorkspace, parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
 import { normalizeAddress } from '@/lib/system/addresses'
@@ -15,6 +15,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!canAccessWorkspace(admin, workspace)) return new NextResponse(null, { status: 403 })
   const contract = request.nextUrl.searchParams.get('contract')?.trim() ?? ''
   const tokenId = request.nextUrl.searchParams.get('tokenId')?.trim() ?? ''
+  if (!(tokenId ? canAccessChart(admin, 'wallet-activity.redemption-history') : canAccessChart(admin, 'wallet-activity.nft-activity'))) return new NextResponse(null, { status: 403 })
   if (!/^0x[0-9a-fA-F]{40}$/.test(contract) || tokenId.length > 256) return new NextResponse(null, { status: 400 })
 
   const normalizedTokenAddress = normalizeAddress(contract)

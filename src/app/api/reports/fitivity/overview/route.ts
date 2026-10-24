@@ -151,6 +151,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       `) : Promise.resolve([] as UserSummaryRow[]),
     ])
 
+    // Resolve display identity after aggregation so multiple wallets never multiply metrics.
+    const identityUsers = Array.from(new Set([...topRows.map((row) => row.user_id.toLowerCase()), ...userSummaryRows.map((row) => row.user_id.toLowerCase())]))
+    const mappings = identityUsers.length ? await prisma.walletMapping.findMany({
+      where: { workspaceId, normalizedUserId: { in: identityUsers } },
+      select: { normalizedUserId: true, walletAddress: true, normalizedWalletAddress: true },
+      orderBy: { normalizedWalletAddress: 'asc' },
+    }) : []
+    const mappingsByUser = new Map<string, typeof mappings>()
+    for (const mapping of mappings) { const linked = mappingsByUser.get(mapping.normalizedUserId) ?? []; linked.push(mapping); mappingsByUser.set(mapping.normalizedUserId, linked) }
+    const identity = (userId: string): string => {
+      const linked = mappingsByUser.get(userId.toLowerCase()) ?? []
+      const wallets = Array.from(new Map(linked.filter((mapping) => /^0x[0-9a-f]{40}$/.test(mapping.normalizedWalletAddress)).map((mapping) => [mapping.normalizedWalletAddress, mapping.walletAddress])).values())
+      return wallets.length ? wallets.join(', ') : linked.length ? 'No EVM wallet mapped' : 'Wallet not mapped'
+    }
+
     const totals = totalRows[0] ?? {
       steps_total: new Prisma.Decimal(0), steps_users: BigInt(0), calories_total: new Prisma.Decimal(0), calories_users: BigInt(0), sleep_total: new Prisma.Decimal(0), sleep_users: BigInt(0),
     }
@@ -163,7 +178,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       points.push({ date: row.date, average: average(row.total, row.user_count), accumulated: accumulated.toString() })
       dailyByMetric.set(row.metric, points)
     }
-    const topByMetric = (metric: string): Array<{ label: string; value: string }> => topRows.filter((row) => row.metric === metric).map((row) => ({ label: row.user_id, value: row.total.toString() }))
+    const topByMetric = (metric: string): Array<{ label: string; value: string }> => topRows.filter((row) => row.metric === metric).map((row) => ({ label: identity(row.user_id), value: row.total.toString() }))
     const distributionLabels: Record<string, string[]> = {
       steps: ['0–2,000 steps/day', '2,001–4,000 steps/day', '4,001–6,000 steps/day', '6,001–8,000 steps/day', '8,001–10,000 steps/day', '10,001–20,000 steps/day', '20,001+ steps/day'],
       calories: ['0–100 kcal/day', '101–200 kcal/day', '201–300 kcal/day', '301–400 kcal/day', '401–500 kcal/day', '501+ kcal/day'],
@@ -200,6 +215,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       },
       userSummary: visibility.userSummary ? userSummaryRows.map((row) => ({
         userId: row.user_id,
+        walletAddress: identity(row.user_id),
         totalSteps: row.total_steps.toString(),
         averageSteps: row.average_steps.toString(),
         totalCalories: row.total_calories.toString(),

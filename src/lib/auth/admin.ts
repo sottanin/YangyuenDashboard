@@ -1,3 +1,4 @@
+import { expandChartKeys } from './chartCatalog'
 import { randomBytes } from 'crypto'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
@@ -81,7 +82,7 @@ export function canAccessMenu(admin: CurrentAdmin, menuKey: string): boolean {
 
 export function allowedChartKeys(admin: CurrentAdmin): string[] {
   if (isSuperAdmin(admin)) return ['*']
-  return Array.from(new Set(admin.roles.flatMap((assignment) => assignment.role.chartPermissions.map((permission) => permission.chartKey))))
+  return expandChartKeys(admin.roles.flatMap((assignment) => assignment.role.chartPermissions.map((permission) => permission.chartKey)))
 }
 
 export function canAccessChart(admin: CurrentAdmin, chartKey: string): boolean {

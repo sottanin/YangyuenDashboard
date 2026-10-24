@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { canAccessMenu, getCurrentAdmin, isSuperAdmin } from '@/lib/auth/admin'
 import { MENU_CATALOG } from '@/lib/auth/menuCatalog'
-import { CHART_CATALOG, CHART_KEYS, chartKeysForMenu } from '@/lib/auth/chartCatalog'
+import { CHART_CATALOG, CHART_KEYS, chartKeysForMenu, expandChartKeys } from '@/lib/auth/chartCatalog'
 import { prisma } from '@/lib/prisma'
 
 const menuKeys = new Set<string>(MENU_CATALOG.map((menu) => menu.key))
@@ -20,6 +20,9 @@ export async function GET(): Promise<NextResponse> {
     roles: roles.map((role) => ({
       ...role,
       permissions: role.permissions.filter((permission) => menuKeys.has(permission.menuKey)),
+      chartPermissions: expandChartKeys(role.chartPermissions.map((permission) => permission.chartKey))
+        .filter((key) => CHART_CATALOG.some((chart) => chart.key === key && role.permissions.some((permission) => permission.menuKey === chart.menuKey)))
+        .map((chartKey) => ({ chartKey })),
     })),
     menuCatalog: MENU_CATALOG,
     chartCatalog: CHART_CATALOG,
