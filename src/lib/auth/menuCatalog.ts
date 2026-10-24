@@ -10,6 +10,7 @@ export const MENU_CATALOG = [
   { key: 'contracts', label: 'Contracts', section: 'System', href: '/dashboard/contracts', icon: 'contract' },
   { key: 'nft-instances', label: 'NFT Instances', section: 'System', href: '/dashboard/nft-instances', icon: 'nft' },
   { key: 'fitivity-data', label: 'Fitivity Data', section: 'System', href: '/dashboard/fitivity-data', icon: 'database' },
+  { key: 'wallet-mapping', label: 'Wallet Mapping', section: 'System', href: '/dashboard/wallet-mapping', icon: 'wallet' },
   { key: 'workspaces', label: 'Workspaces', section: 'System', href: '/dashboard/workspaces', icon: 'workspace' },
   { key: 'admin-users', label: 'Admin Users', section: 'System', href: '/dashboard/admin-users', icon: 'users' },
   { key: 'roles', label: 'Roles', section: 'System', href: '/dashboard/roles', icon: 'shield' },

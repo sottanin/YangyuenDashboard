@@ -34,6 +34,7 @@ const PAGE_LABELS: Record<string, string> = {
   '/dashboard/contracts': 'Contracts',
   '/dashboard/nft-instances': 'NFT Instances',
   '/dashboard/fitivity-data': 'Fitivity Data',
+  '/dashboard/wallet-mapping': 'Wallet Mapping',
   '/dashboard/fitivity-overview': 'Fitivity Overview',
 }
 

@@ -175,6 +175,23 @@ model Workspace {
   addressContracts AddressContract[]
   adminUsers       AdminUserWorkspace[]
   fitivityData     FitivityData[]
+  walletMappings   WalletMapping[]
+}
+
+model WalletMapping {
+  id                      String    @id @default(cuid())
+  userId                  String
+  normalizedUserId        String
+  walletAddress           String
+  normalizedWalletAddress String
+  workspaceId             Int
+  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@unique([workspaceId, normalizedUserId, normalizedWalletAddress])
+  @@index([workspaceId, normalizedUserId])
+  @@index([workspaceId, normalizedWalletAddress])
 }
 
 model FitivityData {
