@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getReportingConfig } from '@/lib/system/config'
 import type { ReportDateRange } from './reportPeriod'
 
-const PAGE_SIZE = 25
+const PAGE_SIZE = 24
 export interface VoucherFilters { range: ReportDateRange; search: string; status: 'all' | 'Available' | 'Used' | 'Unknown' }
 interface ActivitySqlRow { name: string; purchase_count: bigint; redeem_count: bigint; token_address: string; token_id: string }
 interface VoucherSqlRow { token_address: string; token_id: string; name: string; owner_hash: string; detail_th: string | null; purchase_wallet: string; purchase_at: Date; used_at: Date | null; status: 'Available' | 'Used' | 'Unknown' }

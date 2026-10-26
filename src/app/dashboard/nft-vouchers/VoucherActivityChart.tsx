@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { NftRank } from '@/components/ui/NftRank'
+import { TokenAvatar } from '@/components/ui/TokenAvatar'
 export interface VoucherActivityPoint { name: string; purchase: number; redeem: number; tokenAddress: string; tokenId: string; imageUrl: string }
 interface VoucherActivityChartProps { data: VoucherActivityPoint[] }
 export function VoucherActivityChart({ data }: VoucherActivityChartProps): React.JSX.Element {
@@ -9,8 +11,8 @@ export function VoucherActivityChart({ data }: VoucherActivityChartProps): React
   const maximum = Math.max(1, ...data.flatMap((point) => [point.purchase, point.redeem]))
   return <div>
     <p className="mb-4 text-xs text-muted">จำนวนที่ได้รับนับจากวันที่เลือก ส่วนจำนวนที่ใช้แล้วนับจาก voucher ชุดเดียวกันจนถึงข้อมูลล่าสุดที่มี</p>
-    <div className="space-y-5">{rows.map((point) => <div key={point.name} className="grid min-w-0 gap-3 md:grid-cols-[minmax(160px,1fr)_2fr] md:items-center">
-      <div className="break-words text-xs font-medium text-default">{point.name}</div>
+    <div className="space-y-5" role="list" aria-label="NFT voucher comparison rankings">{rows.map((point, index) => <div key={point.name} role="listitem" className="grid min-w-0 gap-3 md:grid-cols-[minmax(160px,1fr)_2fr] md:items-center">
+      <div className="flex min-w-0 items-center gap-2"><NftRank index={index} /><span className="shrink-0" aria-hidden="true"><TokenAvatar src={point.imageUrl} symbol={point.name.slice(0, 2).toUpperCase()} size="md" className="h-7 w-7 rounded-lg" /></span><span className="min-w-0 break-words text-xs font-medium text-default">{point.name}</span></div>
       <dl className="min-w-0 space-y-2">{[{ label: 'Issued', value: point.purchase, color: 'bg-emerald-500' }, { label: 'Used later', value: point.redeem, color: 'bg-rose-500' }].map((series) => <div key={series.label} className="grid min-w-0 grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-2 text-xs">
         <dt className="text-muted">{series.label}</dt>
         <div className="h-3 min-w-0 rounded bg-surface-2" aria-hidden="true"><div className={`h-full rounded ${series.color}`} style={{ width: `${series.value / maximum * 100}%` }} /></div>

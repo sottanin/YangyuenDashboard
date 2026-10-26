@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
+import { AverageReferenceTag } from './AverageReferenceTag'
 import { fmt, smoothPath } from './chartUtils'
 import { useResolvedColors } from './useResolvedColors'
 
@@ -125,14 +126,13 @@ export function DualLineChart({
           <path d={secondaryPath} fill="none" stroke={secondaryColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
           {referenceValue != null ? <g pointerEvents="none">
             <line x1={left} x2={width - right} y1={primaryY(referenceValue)} y2={primaryY(referenceValue)} stroke={primaryColor} strokeWidth="2" strokeDasharray="7 5" />
-            <rect x={width - right - 116} y={Math.max(3, primaryY(referenceValue) - 23)} width="114" height="19" rx="6" fill="rgb(var(--surface))" stroke={primaryColor} strokeOpacity="0.8" />
-            <text x={width - right - 59} y={Math.max(16, primaryY(referenceValue) - 10)} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={primaryColor}>{referenceValue.toLocaleString('en-US', { maximumFractionDigits: primaryFractionDigits })} {referenceUnit}</text>
           </g> : null}
           {hovered !== null && hoverPoint && <g pointerEvents="none">
             <line x1={x(hovered)} x2={x(hovered)} y1={top} y2={top + innerHeight} stroke="rgb(var(--text-muted))" strokeDasharray="3 3" />
             <circle cx={x(hovered)} cy={primaryY(hoverPoint.primary)} r="4" fill={primaryColor} />
             <circle cx={x(hovered)} cy={secondaryY(hoverPoint.secondary)} r="4" fill={secondaryColor} />
           </g>}
+          {referenceValue != null ? <AverageReferenceTag text={`${referenceLabel}: ${referenceValue.toLocaleString('en-US', { maximumFractionDigits: primaryFractionDigits })} ${referenceUnit}`} left={left} right={width - right} y={primaryY(referenceValue)} color={primaryColor} /> : null}
         </svg>
         {hoverPoint && <div
           ref={tooltipRef}

@@ -103,5 +103,5 @@ export function compareReportValues(current: string, previous: string | null): {
   if (previous === null) return { change: null, changeLabel: '' }
   const now = Number(current); const before = Number(previous)
   if (!Number.isFinite(now) || !Number.isFinite(before)) return { change: null, changeLabel: '' }
-  return { change: before === 0 ? (now === 0 ? 0 : null) : Number(((now - before) / Math.abs(before) * 100).toFixed(1)), changeLabel: before === 0 && now !== 0 ? 'มีกิจกรรมใหม่เมื่อเทียบกับช่วงก่อนหน้า' : 'เทียบกับช่วงก่อนหน้าที่มีจำนวนวันเท่ากัน' }
+  return { change: before === 0 ? (now === 0 ? 0 : null) : Number(((now - before) / Math.abs(before) * 100).toFixed(1)), changeLabel: before === 0 && now !== 0 ? 'มีกิจกรรมใหม่เมื่อเทียบกับช่วงก่อนหน้า' : 'เทียบกับช่วงก่อนหน้าที่มีระยะเวลาเท่ากัน' }
 }

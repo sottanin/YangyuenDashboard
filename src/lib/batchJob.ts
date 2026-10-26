@@ -493,10 +493,11 @@ export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
       // those complete snapshots only to the wallets that were fetched by this
       // run. A table-wide reset here could erase a wallet inserted concurrently
       // after the fetch phase even though no KubScan snapshot was obtained for it.
+      const syncedAt = new Date()
       for (const [walletId, balances] of snapshots) {
         const result = await tx.wallet.updateMany({
           where: { walletId: { equals: walletId, mode: 'insensitive' } },
-          data: balances,
+          data: { ...balances, timestamp: syncedAt },
         })
         totalUpdated += result.count
       }

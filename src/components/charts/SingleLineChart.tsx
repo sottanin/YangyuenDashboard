@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useId, useRef, useState, type PointerEvent } from 'react'
+import { AverageReferenceTag } from './AverageReferenceTag'
 import { datePositions } from '@/lib/reporting/chartTimeline'
 import { useResolvedColors } from './useResolvedColors'
 
@@ -73,8 +74,9 @@ export function SingleLineChart({ data, label, tooltipUnit, averageUnit = toolti
         {data.map((point, index) => (index % labelStep === 0 && (index === data.length - 1 || data.length - 1 - index > labelStep / 2)) || index === data.length - 1 ? <text key={point.label} x={x(index)} y={height - 10} textAnchor={index === 0 ? 'start' : index === data.length - 1 ? 'end' : 'middle'} fontSize="10.5" fill="rgb(var(--text-faint))">{axisDate(point.label)}</text> : null)}
         {segments.map((segment, index) => <g key={index}>{segment.length > 1 ? <><path d={`${paths[index]} L ${segment.at(-1)?.[0]},${y(0)} L ${segment[0][0]},${y(0)} Z`} fill={`url(#${gradientId})`} pointerEvents="none" /><path d={paths[index]} fill="none" stroke={lineColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></> : <circle cx={segment[0][0]} cy={segment[0][1]} r="3" fill={lineColor} />}</g>)}
         {data.map((point, index) => point.annotations?.length ? <g key={`annotation-${point.label}`}><line x1={x(index)} x2={x(index)} y1={top + innerHeight - 12} y2={top + innerHeight} stroke={annotationColor} strokeWidth="2" /><circle cx={x(index)} cy={top + innerHeight - 14} r="4.5" fill={annotationColor} /></g> : null)}
-        {showAverage && measured.length ? <g pointerEvents="none"><line x1={left} x2={width - right} y1={y(average)} y2={y(average)} stroke={lineColor} strokeWidth="1.5" strokeDasharray="7 5" /><text x={width - right} y={Math.max(14, y(average) - 7)} textAnchor="end" fontSize="10.5" fontWeight="600" fill={lineColor}>{averageLabelPrefix}{formatValue(average, fractionDigits ?? 2)} {averageUnit}</text></g> : null}
+        {showAverage && measured.length ? <line pointerEvents="none" x1={left} x2={width - right} y1={y(average)} y2={y(average)} stroke={lineColor} strokeWidth="1.5" strokeDasharray="7 5" /> : null}
         {hovered !== null && hoverPoint ? <g pointerEvents="none"><line x1={x(hovered)} x2={x(hovered)} y1={top} y2={top + innerHeight} stroke="rgb(var(--text-muted))" strokeDasharray="3 3" />{values[hovered] !== null && values[hovered] !== undefined ? <circle cx={x(hovered)} cy={y(values[hovered])} r="4" fill={lineColor} /> : null}</g> : null}
+        {showAverage && measured.length ? <AverageReferenceTag text={`${averageLabelPrefix}${formatValue(average, fractionDigits ?? 2)} ${averageUnit}`} left={left} right={width - right} y={y(average)} color={lineColor} /> : null}
       </svg>
       {hoverPoint ? <div className="chart-tooltip !max-w-[calc(100%-1rem)]" style={{ left: `${Math.max(8, Math.min(width - 248, x(hovered ?? 0) - 110))}px`, top: '8px', transform: 'none' }} role="status"><div className="mb-1.5 font-semibold">{hoverPoint.label}</div><p>{hoverPoint.value === null ? 'ยังไม่มีรายงาน' : `${formatValue(hoverPoint.value, digits)} ${tooltipUnit}`}</p>{hoverPoint.detail ? <p className="mt-1 whitespace-normal text-muted">{hoverPoint.detail}</p> : null}{hoverPoint.annotations?.map((annotation, index) => <p key={index} className="mt-1 max-w-64 whitespace-normal border-t border-default pt-1">{annotation}</p>)}</div> : null}
     </div>

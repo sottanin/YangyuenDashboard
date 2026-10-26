@@ -155,7 +155,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const comparison = (current: string, previous: string): { change: number | null; changeLabel: string } => {
       if (!previousRange) return { change: null, changeLabel: '' }
       const before = new Prisma.Decimal(previous); const now = new Prisma.Decimal(current)
-      return { change: before.isZero() ? (now.isZero() ? 0 : null) : now.sub(before).div(before.abs()).mul(100).toDecimalPlaces(1).toNumber(), changeLabel: before.isZero() && !now.isZero() ? 'New activity vs previous period' : 'vs previous equal-length period' }
+      return { change: before.isZero() ? (now.isZero() ? 0 : null) : now.sub(before).div(before.abs()).mul(100).toDecimalPlaces(1).toNumber(), changeLabel: before.isZero() && !now.isZero() ? 'มีกิจกรรมใหม่เมื่อเทียบกับช่วงก่อนหน้า' : 'เทียบกับช่วงก่อนหน้าที่มีระยะเวลาเท่ากัน' }
     }
     const summary = summaryResult[0] ?? { total_transactions: BigInt(0), total_fee: new Prisma.Decimal(0), today_transactions: BigInt(0), yesterday_transactions: BigInt(0), today_fee: new Prisma.Decimal(0), yesterday_fee: new Prisma.Decimal(0) }
     const plainAmounts = new Map(amounts.filter((r) => !r.token_address).map((r) => [r.metric, r]))

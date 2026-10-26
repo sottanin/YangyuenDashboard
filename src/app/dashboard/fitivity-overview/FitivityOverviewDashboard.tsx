@@ -10,6 +10,7 @@ import { PeriodFilter } from '@/components/reports/PeriodFilter'
 import { Card } from '@/components/ui/Card'
 import { ErrorCard } from '@/components/ui/ErrorCard'
 import { KpiTile } from '@/components/ui/KpiTile'
+import { Icon } from '@/components/ui/Icon'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { SkeletonKpi } from '@/components/ui/SkeletonCard'
 import { useChartPermissions } from '@/lib/ChartPermissionContext'
@@ -114,7 +115,7 @@ export function FitivityOverviewDashboard(): React.JSX.Element {
         {visible.totalCalories && report.kpis.calories ? <PerformanceKpi metric="calories" value={report.kpis.calories} /> : null}
         {visible.totalSleep && report.kpis.sleep ? <PerformanceKpi metric="sleep" value={report.kpis.sleep} /> : null}
       </section> : null}
-      <section className="mb-4 grid gap-4 lg:grid-cols-2" aria-label="Fitivity daily trends">
+      <section className="mb-4 grid gap-4 xl:grid-cols-3" aria-label="Fitivity daily trends">
         {visible.stepsTrend ? <TrendCard metric="steps" data={report.trends.steps} from={report.period.from} to={report.period.to} /> : null}
         {visible.caloriesTrend ? <TrendCard metric="calories" data={report.trends.calories} from={report.period.from} to={report.period.to} /> : null}
         {visible.sleepTrend ? <TrendCard metric="sleep" data={report.trends.sleep} from={report.period.from} to={report.period.to} /> : null}
@@ -139,27 +140,24 @@ function PerformanceKpi({ metric, value }: { metric: keyof typeof metricConfig; 
   const icons = { steps: 'steps', calories: 'flame', sleep: 'sleep' }
   const titles = { steps: 'Daily steps per reporting participant', calories: 'Daily active calories per reporting participant', sleep: 'Daily sleep per reporting participant' }
   const changeLabel = value.change !== null ? 'เทียบกับช่วงก่อนหน้า' : value.previousAverage === '0' && value.average !== null && Number(value.average) > 0 ? 'มีข้อมูลกิจกรรมใหม่เมื่อเทียบกับช่วงก่อนหน้า' : undefined
-  return <KpiTile label={titles[metric]} value={value.average === null ? '—' : `${format(value.average, config.digits)} ${config.unit}`} subLabel={`ผู้มีข้อมูล ${value.users.toLocaleString()} คน · มีรายงานจากผู้ใช้รวม ${value.personDays.toLocaleString()} วัน · ${value.coverage === null ? 'ยังไม่มีข้อมูลเพียงพอสำหรับคำนวณสัดส่วน' : `มีข้อมูล ${value.coverage}% ของวันที่นำมาคำนวณ`} · ยอดรวม ${format(value.total, config.digits)} ${config.unit}${value.previousAverage === null ? ' · ยังไม่มีค่าเฉลี่ยช่วงก่อนหน้า' : ` · ค่าเฉลี่ยรายวันช่วงก่อนหน้า ${format(value.previousAverage, config.digits)} ${config.unit}`}`} change={value.change} changeLabel={changeLabel} changeTone="neutral" icon={icons[metric]} />
+  return <KpiTile label={titles[metric]} value={value.average === null ? '—' : `${format(value.average, config.digits)} ${config.unit}`} subLabel={`ผู้มีข้อมูล ${value.users.toLocaleString()} คน · มีรายงานจากผู้ใช้รวม ${value.personDays.toLocaleString()} วัน · ${value.coverage === null ? 'ยังไม่มีข้อมูลเพียงพอสำหรับคำนวณสัดส่วน' : `มีข้อมูล ${value.coverage}% ของวันที่นำมาคำนวณ`} · ยอดรวม ${format(value.total, config.digits)} ${config.unit}${value.previousAverage === null ? ' · ยังไม่มีค่าเฉลี่ยช่วงก่อนหน้า' : ` · ค่าเฉลี่ยรายวันช่วงก่อนหน้า ${format(value.previousAverage, config.digits)} ${config.unit}`}`} change={value.change} changeLabel={changeLabel} icon={icons[metric]} />
 }
 
 function TrendCard({ metric, data, from, to }: { metric: keyof typeof metricConfig; data: TrendPoint[]; from: string; to: string }): React.JSX.Element {
-  const [mode, setMode] = useState<'daily' | 'rolling' | 'cumulative'>('daily')
+  const [mode, setMode] = useState<'daily' | 'cumulative'>('daily')
   const config = metricConfig[metric]
   const byDate = new Map(data.map((point) => [point.date, point]))
   const dates = calendarDays(from, to)
-  const points = dates.map((date, index) => {
+  const points = dates.map((date) => {
     const point = byDate.get(date)
-    const windowPoints = dates.slice(Math.max(0, index - 6), index + 1).flatMap((day) => { const value = byDate.get(day); return value ? [value] : [] })
-    const participants = windowPoints.reduce((total, value) => total + value.users, 0)
-    const rolling = participants ? windowPoints.reduce((total, value) => total + Number(value.average) * value.users, 0) / participants : null
-    return { label: date, value: !point ? null : mode === 'daily' ? Number(point.average) : mode === 'cumulative' ? Number(point.accumulated) : rolling, detail: point ? `ผู้มีรายงาน ${point.users.toLocaleString()} คน${mode === 'rolling' ? ` · รวม ${participants.toLocaleString()} วันที่มีรายงานจากผู้ใช้ใน 7 วันล่าสุด` : ''}` : 'ยังไม่มีรายงานในวันนี้ ไม่ได้หมายถึงค่าศูนย์' }
+    return { label: date, value: !point ? null : mode === 'daily' ? Number(point.average) : Number(point.accumulated), detail: point ? `ผู้มีรายงาน ${point.users.toLocaleString()} คน` : 'ยังไม่มีรายงานในวันนี้ ไม่ได้หมายถึงค่าศูนย์' }
   })
   const personDays = data.reduce((total, point) => total + point.users, 0)
   const mean = personDays ? data.reduce((total, point) => total + Number(point.average) * point.users, 0) / personDays : undefined
-  const labels = { daily: 'ค่าเฉลี่ยรายวัน', rolling: 'ค่าเฉลี่ย 7 วัน', cumulative: 'ยอดสะสมจากข้อมูลที่มี' }
+  const labels = { daily: 'ค่าเฉลี่ยรายวัน', cumulative: 'ยอดสะสมจากข้อมูลที่มี' }
   const cumulativeTitles = { steps: 'Recorded steps · cumulative', calories: 'Recorded active calories · cumulative', sleep: 'Recorded sleep hours · cumulative' }
-  return <Card title={mode === 'cumulative' ? cumulativeTitles[metric] : mode === 'rolling' ? `${config.title} · เฉลี่ย 7 วันล่าสุด` : config.title} subtitle="ใช้เฉพาะวันที่มีรายงาน · ช่องว่างหมายถึงไม่มีข้อมูล ไม่ใช่ศูนย์">
-    <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label={`${config.title} display mode`}>{(['daily', 'rolling', 'cumulative'] as const).map((value) => <button key={value} type="button" className={`btn min-h-11 text-xs ${mode === value ? 'btn-primary' : 'btn-ghost'}`} aria-pressed={mode === value} onClick={() => setMode(value)}>{labels[value]}</button>)}</div>
+  return <Card className="min-w-0" title={mode === 'cumulative' ? cumulativeTitles[metric] : config.title} subtitle="ใช้เฉพาะวันที่มีรายงาน · ช่องว่างหมายถึงไม่มีข้อมูล ไม่ใช่ศูนย์">
+    <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label={`${config.title} display mode`}>{(['daily', 'cumulative'] as const).map((value) => <button key={value} type="button" className={`btn min-h-11 text-xs ${mode === value ? 'btn-primary' : 'btn-ghost'}`} aria-pressed={mode === value} onClick={() => setMode(value)}>{labels[value]}</button>)}</div>
     {data.length ? <SingleLineChart data={points} label={labels[mode]} tooltipUnit={config.unit} color={config.color} fractionDigits={config.digits} showAverage={mode === 'daily'} referenceValue={mean} referenceLabel="ค่าเฉลี่ยจากวันที่มีรายงานของแต่ละคน" height={280} /> : <Empty label="ไม่พบข้อมูลกิจกรรมในช่วงเวลานี้" />}
   </Card>
 }
@@ -226,7 +224,7 @@ function UserSummaryTable({ rows, workspace, period, from, to }: { rows: UserSum
           </th>)}<th className="px-4 py-3 text-left text-xs font-medium text-faint">Reported days<br />Steps / Calories / Sleep</th>
         </tr></thead>
         <tbody>{pageRows.map((row) => <tr key={row.userId} className="tbl-row border-b border-default last:border-0">
-          {summaryColumns.map((column) => <td key={column.key} className={`whitespace-nowrap px-4 py-3 ${column.key === 'walletAddress' ? 'max-w-[300px] whitespace-normal break-all font-mono text-left text-xs text-default' : 'text-right font-mono text-xs text-muted'}`}>{column.key === 'walletAddress' ? row.wallets.length ? <div className="space-y-2">{row.wallets.map((wallet) => <div key={wallet} className="flex flex-wrap items-center gap-2"><a href={walletHref(wallet)} className="font-mono text-accent underline" title={wallet}>{wallet.slice(0, 8)}…{wallet.slice(-6)}</a><button type="button" className="rounded border border-default px-2 py-1 text-[10px] hover:text-accent" aria-label={`Copy wallet ${wallet}`} onClick={() => void navigator.clipboard.writeText(wallet).then(() => setCopyStatus('Wallet address copied')).catch(() => setCopyStatus('Unable to copy wallet address'))}>Copy</button><a href={`https://www.kubscan.com/address/${encodeURIComponent(wallet)}?tab=tokens`} target="_blank" rel="noopener noreferrer" className="text-[10px] underline" aria-label={`Open ${wallet} on KubScan`}>KubScan ↗</a></div>)}</div> : row.walletAddress : reportedDays(row, column.key) === 0 ? <span title="ยังไม่มีรายงานสำหรับข้อมูลประเภทนี้" aria-label="ยังไม่มีรายงาน">—</span> : `${format(row[column.key], column.digits)} ${column.unit}`}</td>)}<td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">{row.stepsDays} / {row.caloriesDays} / {row.sleepDays}</td>
+          {summaryColumns.map((column) => <td key={column.key} className={`whitespace-nowrap px-4 py-3 ${column.key === 'walletAddress' ? 'max-w-[300px] whitespace-normal break-all font-mono text-left text-xs text-default' : 'text-right font-mono text-xs text-muted'}`}>{column.key === 'walletAddress' ? row.wallets.length ? <div className="space-y-2">{row.wallets.map((wallet) => <div key={wallet} className="flex flex-wrap items-center gap-2"><a href={walletHref(wallet)} className="font-mono text-accent underline" title={wallet}>{wallet.slice(0, 8)}…{wallet.slice(-6)}</a><button type="button" className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-default text-muted transition-colors duration-150 hover:bg-accent/10 hover:text-accent active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" aria-label={`Copy wallet ${wallet}`} title={`Copy wallet ${wallet}`} onClick={() => void navigator.clipboard.writeText(wallet).then(() => setCopyStatus('Wallet address copied')).catch(() => setCopyStatus('Unable to copy wallet address'))}><span aria-hidden="true"><Icon name="copy" size={15} /></span></button><a href={`https://www.kubscan.com/address/${encodeURIComponent(wallet)}?tab=tokens`} target="_blank" rel="noopener noreferrer" className="text-[10px] underline" aria-label={`Open ${wallet} on KubScan`}>KubScan ↗</a></div>)}</div> : row.walletAddress : reportedDays(row, column.key) === 0 ? <span title="ยังไม่มีรายงานสำหรับข้อมูลประเภทนี้" aria-label="ยังไม่มีรายงาน">—</span> : `${format(row[column.key], column.digits)} ${column.unit}`}</td>)}<td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">{row.stepsDays} / {row.caloriesDays} / {row.sleepDays}</td>
         </tr>)}</tbody>
       </table>
     </div>}
