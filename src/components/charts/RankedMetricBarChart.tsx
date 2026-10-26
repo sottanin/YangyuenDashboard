@@ -2,8 +2,10 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { useResolvedColors } from './useResolvedColors'
+import { useWorkspace } from '@/lib/WorkspaceContext'
+import type { ReportPeriod } from '@/lib/reporting/reportPeriod'
 
-export interface RankedMetricPoint { label: string; value: string }
+export interface RankedMetricPoint { label: string; value: string; walletAddress?: string; detail?: string }
 
 interface Props {
   data: RankedMetricPoint[]
@@ -11,14 +13,13 @@ interface Props {
   color: string
   ariaLabel: string
   maximumFractionDigits?: number
+  drilldownPeriod?: ReportPeriod
+  drilldownFrom?: string
+  drilldownTo?: string
 }
 
 function RankMarker({ index, y }: { index: number; y: number }): React.JSX.Element {
-  if (index > 2) return <text x="0" y={y} fontSize="10.5" fill="rgb(var(--text-faint))">#{index + 1}</text>
-  const colorClass = index === 0 ? 'text-yellow-500' : index === 1 ? 'text-slate-300' : 'text-amber-700'
-  return <g transform={`translate(0 ${y - 12})`} className={colorClass} fill="currentColor" aria-label={`Rank ${index + 1}`}>
-    <path d="M4 2h10v3.1c0 3.4-2 5.9-5 6.6v2.1h3v2H6v-2h3v-2.1C6 11 4 8.5 4 5.1V2Zm-2 1h2v2.2C4 7.1 3 8.4 1.2 8.8L.5 7.1C1.5 6.8 2 6.2 2 5.2V3Zm12 0h2v2.2c0 1 .5 1.6 1.5 1.9l-.7 1.7C15 8.4 14 7.1 14 5.2V3Z" />
-  </g>
+  return <text x="0" y={y} fontSize="10.5" fill="rgb(var(--text-faint))">#{index + 1}</text>
 }
 
 function formatValue(value: string, maximumFractionDigits: number): string {
@@ -26,7 +27,9 @@ function formatValue(value: string, maximumFractionDigits: number): string {
   return Number.isFinite(number) ? number.toLocaleString('en-US', { maximumFractionDigits }) : value
 }
 
-export function RankedMetricBarChart({ data, unit, color, ariaLabel, maximumFractionDigits = 0 }: Props): React.JSX.Element {
+export function RankedMetricBarChart({ data, unit, color, ariaLabel, maximumFractionDigits = 0, drilldownPeriod = 'all', drilldownFrom, drilldownTo }: Props): React.JSX.Element {
+  const { selected } = useWorkspace()
+  const href = (address: string): string => { const params = new URLSearchParams({ workspace: String(selected.id), wallet: address, period: drilldownPeriod }); if (drilldownPeriod === 'custom' && drilldownFrom && drilldownTo) { params.set('from', drilldownFrom); params.set('to', drilldownTo) }; return `/dashboard/wallet-activity?${params}` }
   const rootRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(640)
   const [hovered, setHovered] = useState<number | null>(null)
@@ -39,7 +42,7 @@ export function RankedMetricBarChart({ data, unit, color, ariaLabel, maximumFrac
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
-  const height = Math.max(280, data.length * 34 + 18)
+  const height = Math.max(280, data.length * 43 + 18)
   const left = width < 440 ? 118 : 168
   const right = width < 440 ? 96 : 138
   const innerWidth = Math.max(1, width - left - right)
@@ -54,9 +57,9 @@ export function RankedMetricBarChart({ data, unit, color, ariaLabel, maximumFrac
         const barHeight = rowHeight * 0.64
         const barWidth = values[index] / maximum * innerWidth
         return <g key={`${index}:${point.label}`} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} opacity={hovered !== null && hovered !== index ? 0.52 : 1}>
-          <title>{point.label}</title>
+          <title>{point.label}{point.detail ? ` · ${point.detail?.replace(/ reported days$/, ' วันที่มีรายงาน')}` : ''}</title>
           <RankMarker index={index} y={y + barHeight / 2 + 4} />
-          <text x="25" y={y + barHeight / 2 + 4} fontSize="10.5" fill="rgb(var(--text-muted))">{point.label.length > 19 ? `${point.label.slice(0, 10)}…${point.label.slice(-6)}` : point.label}</text>
+          <a href={point.walletAddress ? href(point.walletAddress) : undefined} aria-label={point.walletAddress ? `ดูรายการในกระเป๋า for ${point.walletAddress}` : point.label}><text x="25" y={y + barHeight / 2 + 4} fontSize="10.5" fill="rgb(var(--text-muted))">{point.walletAddress ? `${point.walletAddress.slice(0, 8)}…${point.walletAddress.slice(-6)}` : point.label}</text></a>{point.detail ? <text x="25" y={y + barHeight + 12} fontSize="9" fill="rgb(var(--text-faint))">{point.detail?.replace(/ reported days$/, ' วันที่มีรายงาน')}</text> : null}
           <rect x={left} y={y} width={innerWidth} height={barHeight} rx="5" fill="rgb(var(--grid))" opacity="0.25" />
           <rect x={left} y={y} width={Math.max(2, barWidth)} height={barHeight} rx="5" fill={`url(#${gradientId})`} />
           <text x={width - 4} y={y + barHeight / 2 + 4} textAnchor="end" fontSize="10.5" fill="rgb(var(--text))">{formatValue(point.value, maximumFractionDigits)} {unit}</text>

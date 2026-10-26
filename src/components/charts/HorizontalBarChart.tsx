@@ -3,6 +3,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useResolvedColors } from './useResolvedColors'
 import { Icon } from '@/components/ui/Icon'
+import { useWorkspace } from '@/lib/WorkspaceContext'
+import type { ReportPeriod } from '@/lib/reporting/reportPeriod'
 
 export interface HorizontalBarPoint {
   walletAddress: string
@@ -15,6 +17,9 @@ interface HorizontalBarChartProps {
   color?: string
   ariaLabel: string
   rankMarker?: 'trophy' | 'wealth'
+  drilldownPeriod?: ReportPeriod
+  drilldownFrom?: string
+  drilldownTo?: string
 }
 
 function compactAddress(address: string): string {
@@ -43,7 +48,9 @@ function RankMarker({ index, y, variant }: { index: number; y: number; variant: 
   </g>
 }
 
-export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', ariaLabel, rankMarker = 'trophy' }: HorizontalBarChartProps): React.JSX.Element {
+export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', ariaLabel, rankMarker = 'trophy', drilldownPeriod = 'all', drilldownFrom, drilldownTo }: HorizontalBarChartProps): React.JSX.Element {
+  const { selected } = useWorkspace()
+  const walletHref = (address: string): string => { const params = new URLSearchParams({ wallet: address, workspace: String(selected.id), period: drilldownPeriod }); if (drilldownPeriod === 'custom' && drilldownFrom && drilldownTo) { params.set('from', drilldownFrom); params.set('to', drilldownTo) }; return `/dashboard/wallet-activity?${params}` }
   const rootRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(640)
@@ -67,7 +74,7 @@ export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', aria
   }, [hovered])
 
   const height = Math.max(250, data.length * 31 + 26)
-  const left = width < 440 ? 112 : 146
+  const left = width < 440 ? 136 : 160
   const visibleValueLabels = data.map((point) => `${formatExactAmount(point.amount)} ${symbol}`)
   const longestValueLabel = visibleValueLabels.reduce((longest, label) => Math.max(longest, label.length), 0)
   const right = Math.min(width < 440 ? 132 : 190, Math.max(width < 440 ? 76 : 96, longestValueLabel * 6.5 + 18))
@@ -99,7 +106,7 @@ export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', aria
         const barWidth = (numericValues[index] / maximum) * innerWidth
         return <g key={point.walletAddress} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)}>
           <RankMarker index={index} y={y + barHeight / 2 + 4} variant={rankMarker} />
-          <a href={`https://www.kubscan.com/address/${encodeURIComponent(point.walletAddress)}?tab=tokens`} target="_blank" rel="noopener noreferrer" aria-label={`Open rank ${index + 1} wallet ${point.walletAddress} tokens on KubScan`} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)}>
+          <a href={walletHref(point.walletAddress)} aria-label={`ดูรายการในกระเป๋า for rank ${index + 1} wallet ${point.walletAddress}`} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)}>
             <g transform={`translate(24 ${y + barHeight / 2 - 6})`} fill="none" stroke="rgb(var(--text-muted))" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="4" r="3" /><path d="M1 13v-1c0-2.2 2.2-4 5-4s5 1.8 5 4v1" /></g>
             <text x="40" y={y + barHeight / 2 + 4} fontSize="10.5" fill="rgb(var(--text-muted))" className="hover:fill-[rgb(var(--accent))]">{compactAddress(point.walletAddress)}</text>
           </a>
@@ -113,6 +120,7 @@ export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', aria
       <div className="flex items-center gap-1.5 font-mono text-xs font-semibold"><Icon name="user" size={13} />{hoveredPoint.walletAddress}</div>
       <div className="mt-1 flex items-center gap-2 whitespace-nowrap"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: barColor }} aria-hidden="true" /><span><span className="font-mono">{formatExactAmount(hoveredPoint.amount)}</span> {symbol}</span></div>
     </div> : null}
+    <details className="mt-2 text-xs text-muted"><summary className="cursor-pointer rounded py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">ดูรายละเอียดกระเป๋าและรายการเพิ่มเติม</summary><ul className="space-y-2 py-2">{data.map((point) => <li key={point.walletAddress} className="flex flex-wrap items-center gap-2"><a href={walletHref(point.walletAddress)} className="break-all font-mono hover:text-accent" title={point.walletAddress}>{compactAddress(point.walletAddress)} · ดูรายการในกระเป๋า</a><a href={`https://www.kubscan.com/address/${encodeURIComponent(point.walletAddress)}?tab=tokens`} target="_blank" rel="noopener noreferrer" className="underline">KubScan ↗</a></li>)}</ul></details>
     <div className="sr-only"><ol>{data.map((point, index) => <li key={point.walletAddress}>Rank {index + 1}, {point.walletAddress}: {formatExactAmount(point.amount)} {symbol}</li>)}</ol></div>
   </div>
 }

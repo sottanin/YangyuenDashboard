@@ -329,3 +329,37 @@ export async function getNftRedemptionTransactions(
     totalPages: Math.max(1, Math.ceil(total / limit)),
   }
 }
+
+/** Event history and current lifecycle are deliberately separate populations. */
+export async function getNftRedemptionInsights(workspace: number | 'all', tokenAddress: string, range: ReportDateRange) {
+  const context = await reportContext(workspace, tokenAddress)
+  const monthly = (range.end.getTime() - range.start.getTime()) / 86_400_000 > 90
+  const [trendRows, lifecycleRows] = await Promise.all([
+    prisma.$queryRaw<Array<{ bucket: string; issued: bigint; used: bigint }>>(Prisma.sql`
+      SELECT TO_CHAR(d."timestamp" AT TIME ZONE 'UTC' AT TIME ZONE ${context.timezone},${monthly ? 'YYYY-MM' : 'YYYY-MM-DD'}) bucket,
+        COUNT(*) FILTER(WHERE LOWER(d."fromHash")=ANY(${addressArray(context.zeroAddresses)}) AND NOT(LOWER(d."toHash")=ANY(${addressArray(context.registeredAddresses)})))::bigint issued,
+        COUNT(*) FILTER(WHERE LOWER(d."toHash")=ANY(${addressArray(context.zeroAddresses)}) AND NOT(LOWER(d."fromHash")=ANY(${addressArray(context.registeredAddresses)})))::bigint used
+      FROM "RedemptionTransactionDetail" d WHERE LOWER(d."tokenAddress")=ANY(${addressArray(context.nftAddresses)}) AND d."timestamp">=${range.start} AND d."timestamp"<${range.end} ${nftTokenAssociation(context, 'd')}
+      GROUP BY bucket ORDER BY bucket
+    `),
+    prisma.$queryRaw<Array<{ active: bigint; used: bigint; unknown: bigint; data_through: Date | null }>>(Prisma.sql`
+      WITH issued AS (
+        SELECT DISTINCT LOWER(d."tokenAddress") token_address,d."tokenId" token_id FROM "RedemptionTransactionDetail" d
+        WHERE LOWER(d."tokenAddress")=ANY(${addressArray(context.nftAddresses)}) AND LOWER(d."fromHash")=ANY(${addressArray(context.zeroAddresses)}) AND NOT(LOWER(d."toHash")=ANY(${addressArray(context.registeredAddresses)})) AND d."tokenId" IS NOT NULL AND d."timestamp">=${context.historyStart} ${nftTokenAssociation(context, 'd')}
+      ),latest AS (
+        SELECT DISTINCT ON (LOWER(d."tokenAddress"),d."tokenId") LOWER(d."tokenAddress") token_address,d."tokenId" token_id,LOWER(d."toHash") owner,d."timestamp"
+        FROM "RedemptionTransactionDetail" d JOIN issued i ON i.token_address=LOWER(d."tokenAddress") AND i.token_id=d."tokenId"
+        ORDER BY LOWER(d."tokenAddress"),d."tokenId",d."timestamp" DESC,d.key DESC
+      ) SELECT COUNT(*) FILTER(WHERE owner ~ '^0x[0-9a-f]{40}$' AND NOT(owner=ANY(${addressArray(context.registeredAddresses)})) AND NOT(owner=ANY(${addressArray(context.zeroAddresses)})))::bigint active,
+        COUNT(*) FILTER(WHERE owner=ANY(${addressArray(context.zeroAddresses)}))::bigint used,
+        COUNT(*) FILTER(WHERE NOT(owner ~ '^0x[0-9a-f]{40}$') OR (owner=ANY(${addressArray(context.registeredAddresses)}) AND NOT(owner=ANY(${addressArray(context.zeroAddresses)}))))::bigint unknown,
+        MAX("timestamp") data_through FROM latest
+    `),
+  ])
+  const start = new Date(`${range.from}T00:00:00Z`); const last = new Date(`${range.to}T00:00:00Z`)
+  const buckets: string[] = []
+  if (monthly) { start.setUTCDate(1); last.setUTCDate(1) }
+  while (start <= last && buckets.length < 36_600) { buckets.push(start.toISOString().slice(0, monthly ? 7 : 10)); if (monthly) start.setUTCMonth(start.getUTCMonth() + 1); else start.setUTCDate(start.getUTCDate() + 1) }
+  const byBucket = new Map(trendRows.map((row) => [row.bucket, row])); const inventory = lifecycleRows[0]
+  return { trend: buckets.map((bucket) => ({ label: bucket, issued: Number(byBucket.get(bucket)?.issued ?? 0), used: Number(byBucket.get(bucket)?.used ?? 0) })), currentInventory: { active: Number(inventory?.active ?? 0), used: Number(inventory?.used ?? 0), unknown: Number(inventory?.unknown ?? 0) }, dataThrough: inventory?.data_through?.toISOString() ?? null }
+}

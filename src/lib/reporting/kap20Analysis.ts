@@ -6,11 +6,12 @@ import { normalizeAddress } from '@/lib/system/addresses'
 import { walletBalanceColumnForTokenAddress, walletBalanceFieldForTokenAddress } from '@/lib/walletBalances'
 import { getWorkspaceReportScope } from './workspaceScope'
 import { reportingDaySql } from './reportingDay'
+import type { ReportDateRange } from './reportPeriod'
 
 interface AggregateRow { mint: Prisma.Decimal | null; backup_balance: Prisma.Decimal | null; workspace_balance: Prisma.Decimal | null; user_balance: Prisma.Decimal | null; user_transaction_balance: Prisma.Decimal | null; redemption_gross: Prisma.Decimal | null; redemption_fee: Prisma.Decimal | null }
 interface DailyRow { day: Date | string; total_transactions: bigint; total_amount: Prisma.Decimal | null }
 interface TopRow { wallet_address: string; amount: Prisma.Decimal }
-interface WalletBalanceRow { normalized_address: string; balance: Prisma.Decimal | null }
+interface WalletBalanceRow { normalized_address: string; balance: Prisma.Decimal | null; timestamp: Date | null }
 interface PointTokenPerformanceRow { normalized_address: string; incoming_transfers: Prisma.Decimal | null; outgoing_transfers: Prisma.Decimal | null }
 
 function amount(value: Prisma.Decimal | string | null | undefined): string { return value?.toString() ?? '0' }
@@ -93,7 +94,7 @@ export async function listKap20Tokens(workspace: number | 'all') {
   return value ? [value.token] : []
 }
 
-export async function getKap20Summary(tokenAddress: string, workspace: number | 'all') {
+export async function getKap20Summary(tokenAddress: string, workspace: number | 'all', range?: ReportDateRange) {
   const value = await context(workspace)
   if (!value || normalizeAddress(tokenAddress) !== normalizeAddress(value.token.address)) return null
   const zero = addressArray(value.zero); const main = addressArray(value.main); const workspaceWalletAddresses = addressArray(value.workspaceWallets); const incomingWallets = addressArray([...value.initialMintWallets, ...value.workspaceWallets]); const outgoingTargets = addressArray([...value.loyaltySwaps, ...value.workspaceWallets]); const marketplace = addressArray(value.marketplaces); const marketplaceFees = addressArray(value.marketplaceFees); const pointContractAddresses = value.pointContracts.map((contract) => contract.normalizedAddress); const pointContracts = addressArray(pointContractAddresses)
@@ -144,12 +145,12 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
     `),
     prisma.$queryRaw<WalletBalanceRow[]>(Prisma.sql`
       WITH ranked AS (
-        SELECT LOWER("walletId") AS normalized_address, ${balanceColumn} AS balance,
+        SELECT LOWER("walletId") AS normalized_address, ${balanceColumn} AS balance, "timestamp",
           ROW_NUMBER() OVER (PARTITION BY LOWER("walletId") ORDER BY "timestamp" DESC NULLS LAST, id DESC) AS row_number
         FROM "Wallet"
         WHERE LOWER("walletId") = ANY(${addressArray([...value.workspaceWallets, ...pointContractAddresses])})
       )
-      SELECT normalized_address, balance FROM ranked WHERE row_number = 1
+      SELECT normalized_address, balance, "timestamp" FROM ranked WHERE row_number = 1
     `),
     prisma.$queryRaw<PointTokenPerformanceRow[]>(Prisma.sql`
       SELECT LOWER(point."pointAddress") AS normalized_address,
@@ -166,17 +167,18 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
   ])
   const total = totals[0]
   const balances = new Map(walletBalances.map((row) => [row.normalized_address, amount(row.balance)]))
+  const snapshotByAddress = new Map(walletBalances.map((row) => [row.normalized_address, row]))
   const performance = new Map(pointTokenPerformance.map((row) => [row.normalized_address, { incoming: amount(row.incoming_transfers), outgoing: amount(row.outgoing_transfers) }]))
   const sumBalances = (addresses: string[]): string => addresses.reduce((sum, address) => sum.add(new Prisma.Decimal(balances.get(address) ?? '0')), new Prisma.Decimal(0)).toString()
   const snapshotWorkspaceWallet = new Prisma.Decimal(sumBalances(value.workspaceWallets))
   const transactionWorkspaceWallet = new Prisma.Decimal(amount(total?.workspace_balance))
-  const workspaceWallet = (snapshotWorkspaceWallet.isZero() && !transactionWorkspaceWallet.isZero() ? transactionWorkspaceWallet : snapshotWorkspaceWallet).toString()
+  const workspaceWallet = (value.workspaceWallets.every((address) => snapshotByAddress.has(address)) ? snapshotWorkspaceWallet : transactionWorkspaceWallet).toString()
   const snapshotDistributorPool = new Prisma.Decimal(sumBalances(pointContractAddresses))
   const transactionDistributorPool = Array.from(performance.values()).reduce(
     (sum, row) => sum.add(new Prisma.Decimal(row.incoming)).sub(new Prisma.Decimal(row.outgoing)),
     new Prisma.Decimal(0),
   )
-  const distributorPool = (snapshotDistributorPool.isZero() && !transactionDistributorPool.isZero() ? transactionDistributorPool : snapshotDistributorPool).toString()
+  const distributorPool = (pointContractAddresses.every((address) => snapshotByAddress.has(address)) ? snapshotDistributorPool : transactionDistributorPool).toString()
   const snapshotUserBalance = new Prisma.Decimal(amount(total?.user_balance))
   const transactionUserBalance = new Prisma.Decimal(amount(total?.user_transaction_balance))
   const userWallet = (snapshotUserBalance.isZero() && !transactionUserBalance.isZero() ? transactionUserBalance : snapshotUserBalance).toString()
@@ -187,6 +189,8 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
     address: contract.address,
     imageUrl: contract.imageKey ? `/api/contracts/token/${contract.id}/image` : null,
     active: contract.active,
+    reserve: snapshotByAddress.has(contract.normalizedAddress) ? amount(snapshotByAddress.get(contract.normalizedAddress)?.balance) : null,
+    syncedAt: snapshotByAddress.get(contract.normalizedAddress)?.timestamp?.toISOString() ?? null,
     incomingTransfers: performance.get(contract.normalizedAddress)?.incoming ?? '0',
     outgoingTransfers: performance.get(contract.normalizedAddress)?.outgoing ?? '0',
   }))
@@ -194,7 +198,32 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
   const redemptionBurn = Prisma.Decimal.max(new Prisma.Decimal(0), new Prisma.Decimal(amount(total?.redemption_gross)).sub(redemptionFee))
   const accounted = new Prisma.Decimal(amount(total?.backup_balance)).add(workspaceWallet).add(distributorPool).add(userWallet).add(redemptionBurn).add(redemptionFee)
   const reconciliationDelta = new Prisma.Decimal(amount(total?.mint)).sub(accounted)
+  const selectedRange = range
+  const [flowRows, freshness] = await Promise.all([
+    prisma.$queryRaw<Array<{ mint: Prisma.Decimal; redemption_gross: Prisma.Decimal; redemption_fee: Prisma.Decimal }>>(Prisma.sql`
+      WITH registered AS(SELECT "normalizedAddress" FROM "TokenContract" UNION SELECT "normalizedAddress" FROM "AddressContract")
+      SELECT COALESCE(SUM(value) FILTER(WHERE LOWER("fromHash")=ANY(${zero})),0) mint,
+      COALESCE(SUM(value) FILTER(WHERE LOWER("toHash")=ANY(${marketplace}) AND NOT EXISTS(SELECT 1 FROM registered r WHERE r."normalizedAddress"=LOWER(d."fromHash"))),0) redemption_gross,
+      COALESCE(SUM(value) FILTER(WHERE LOWER("fromHash")=ANY(${marketplace}) AND LOWER("toHash")=ANY(${marketplaceFees})),0) redemption_fee
+      FROM "TransactionDetail" d WHERE LOWER("tokenAddress")=${token} AND "timestamp">=${selectedRange?.start ?? value.historyStart} ${selectedRange ? Prisma.sql`AND "timestamp"<${selectedRange.end}` : Prisma.empty}
+    `),
+    prisma.transactionDetail.aggregate({ where: { tokenAddress: { equals: token, mode: 'insensitive' } }, _max: { timestamp: true } }),
+  ])
+  const flow = flowRows[0]
+  const dailyMap = new Map(days.map((day) => [day.day instanceof Date ? dayKey(day.day, value.timezone) : String(day.day).slice(0, 10), { totalTransactions: Number(day.total_transactions), totalAmount: amount(day.total_amount) }]))
+  const daily: Array<{ date: string; totalTransactions: number; totalAmount: string }> = []
+  const chartFrom = selectedRange?.from ?? dayKey(value.historyStart, value.timezone)
+  const chartTo = selectedRange?.to ?? dayKey(new Date(), value.timezone)
+  for (const cursor = new Date(`${chartFrom}T00:00:00Z`); cursor.toISOString().slice(0, 10) <= chartTo; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    if (daily.length >= 4000) throw new Error('Configured business history exceeds the supported chart range')
+    const date = cursor.toISOString().slice(0, 10); const point = dailyMap.get(date)
+    daily.push({ date, totalTransactions: point?.totalTransactions ?? 0, totalAmount: point?.totalAmount ?? '0' })
+  }
   return {
+    period: selectedRange ? { from: selectedRange.from, to: selectedRange.to } : null,
+    dataThrough: freshness._max.timestamp?.toISOString() ?? null,
+    snapshotAt: walletBalances.map((row) => row.timestamp?.toISOString()).filter((date): date is string => Boolean(date)).sort()[0] ?? null,
+    activity: { mint: amount(flow?.mint), redemptionBurn: Prisma.Decimal.max(new Prisma.Decimal(0), new Prisma.Decimal(amount(flow?.redemption_gross)).sub(amount(flow?.redemption_fee))).toString(), redemptionFee: amount(flow?.redemption_fee) },
     token: value.token,
     mint: amount(total?.mint),
     backupWallet: amount(total?.backup_balance),
@@ -205,21 +234,21 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
     redemptionFee: redemptionFee.toString(),
     pointTokenLocks,
     reconciliationDelta: reconciliationDelta.toString(), reconciliationMatched: reconciliationDelta.isZero(),
-    daily: days.map((day) => ({ date: day.day instanceof Date ? dayKey(day.day, value.timezone) : String(day.day).slice(0, 10), totalTransactions: Number(day.total_transactions), totalAmount: amount(day.total_amount) })), timezone: value.timezone, historyStart: value.historyStart.toISOString(),
+    daily, timezone: value.timezone, historyStart: value.historyStart.toISOString(),
   }
 }
 
-export async function getKap20Transactions(tokenAddress: string, workspace: number | 'all', page: number, limit: number, search = '') {
+export async function getKap20Transactions(tokenAddress: string, workspace: number | 'all', page: number, limit: number, search = '', range?: ReportDateRange) {
   const value = await context(workspace)
   if (!value || normalizeAddress(tokenAddress) !== normalizeAddress(value.token.address)) return null
-  const where: Prisma.TransactionDetailWhereInput = { tokenAddress: { equals: value.token.address, mode: 'insensitive' }, timestamp: { gte: value.historyStart }, ...(search ? { OR: [{ txId: { contains: search, mode: 'insensitive' } }, { fromHash: { contains: search, mode: 'insensitive' } }, { toHash: { contains: search, mode: 'insensitive' } }] } : {}) }
+  const where: Prisma.TransactionDetailWhereInput = { tokenAddress: { equals: value.token.address, mode: 'insensitive' }, timestamp: { gte: range?.start ?? value.historyStart, ...(range ? { lt: range.end } : {}) }, ...(search ? { OR: [{ txId: { contains: search, mode: 'insensitive' } }, { fromHash: { contains: search, mode: 'insensitive' } }, { toHash: { contains: search, mode: 'insensitive' } }] } : {}) }
   const [items, total] = await Promise.all([prisma.transactionDetail.findMany({ where, orderBy: [{ timestamp: 'desc' }, { key: 'desc' }], skip: (page - 1) * limit, take: limit, include: { header: { select: { status: true } } } }), prisma.transactionDetail.count({ where })])
   const registry = await prisma.addressContract.findMany({ select: { normalizedAddress: true, name: true, role: true } })
   const names = new Map(registry.map((row) => [row.normalizedAddress, row.name])); const zero = new Set(value.zero); const markets = new Set(value.marketplaces)
   return { rows: items.map((item) => ({ id: item.id, key: item.key, txId: item.txId, timestamp: item.timestamp.toISOString(), type: zero.has(normalizeAddress(item.fromHash)) ? 'Mint' : markets.has(normalizeAddress(item.toHash)) ? 'Burn' : 'Transfer', flow: classifyFlow(item), status: item.header.status, tokenName: item.tokenName, tokenSymbol: item.tokenSymbol, fromHash: item.fromHash, fromName: names.get(normalizeAddress(item.fromHash)) ?? null, toHash: item.toHash, toName: names.get(normalizeAddress(item.toHash)) ?? null, value: item.value.toString() })), total, totalPages: Math.max(1, Math.ceil(total / limit)) }
 }
 
-export async function getKap20TopUsers(tokenAddress: string, workspace: number | 'all') {
+export async function getKap20TopUsers(tokenAddress: string, workspace: number | 'all', range?: ReportDateRange) {
   const value = await context(workspace)
   if (!value || normalizeAddress(tokenAddress) !== normalizeAddress(value.token.address)) return null
   const token = normalizeAddress(value.token.address)
@@ -235,7 +264,8 @@ export async function getKap20TopUsers(tokenAddress: string, workspace: number |
         SUM(d."value") AS amount
       FROM "TransactionDetail" d
       WHERE LOWER(d."tokenAddress") = ${token}
-        AND d."timestamp" >= ${value.historyStart}
+        AND d."timestamp" >= ${range?.start ?? value.historyStart}
+        ${range ? Prisma.sql`AND d."timestamp" < ${range.end}` : Prisma.empty}
         AND NOT EXISTS (
           SELECT 1 FROM registered r WHERE r."normalizedAddress" = LOWER(d."toHash")
         )

@@ -87,3 +87,21 @@ export async function parseReportDateRange(params: URLSearchParams): Promise<Rep
   end.setUTCDate(end.getUTCDate() + 1)
   return { start, end, from, to, period }
 }
+
+/** Equal-length prior calendar window; all-time and history-truncated baselines are unavailable. */
+export async function getPreviousReportRange(range: ReportDateRange): Promise<ReportDateRange | null> {
+  if (range.period === 'all') return null
+  const config = await getReportingConfig()
+  const duration = range.end.getTime() - range.start.getTime()
+  const end = new Date(range.start)
+  const start = new Date(end.getTime() - duration)
+  if (start < new Date(config.businessHistoryStart)) return null
+  return { start, end, from: dateKeyAtBangkok(start), to: dateKeyAtBangkok(new Date(end.getTime() - 1)), period: range.period }
+}
+
+export function compareReportValues(current: string, previous: string | null): { change: number | null; changeLabel: string } {
+  if (previous === null) return { change: null, changeLabel: '' }
+  const now = Number(current); const before = Number(previous)
+  if (!Number.isFinite(now) || !Number.isFinite(before)) return { change: null, changeLabel: '' }
+  return { change: before === 0 ? (now === 0 ? 0 : null) : Number(((now - before) / Math.abs(before) * 100).toFixed(1)), changeLabel: before === 0 && now !== 0 ? 'มีกิจกรรมใหม่เมื่อเทียบกับช่วงก่อนหน้า' : 'เทียบกับช่วงก่อนหน้าที่มีจำนวนวันเท่ากัน' }
+}

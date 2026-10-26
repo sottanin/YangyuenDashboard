@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { canAccessAnyChart, canAccessChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
 import { getWorkspaceReportScope, isSelectableReportWorkspace, parseWorkspaceSelection, WorkspaceNotFoundError } from '@/lib/reporting/workspaceScope'
 import { normalizeAddress } from '@/lib/system/addresses'
-import { parseReportDateRange, ReportPeriodError } from '@/lib/reporting/reportPeriod'
+import { getPreviousReportRange, parseReportDateRange, ReportPeriodError } from '@/lib/reporting/reportPeriod'
 
 const TIME_ZONE = 'Asia/Bangkok'
 const ZERO = '0x0000000000000000000000000000000000000000'
@@ -17,7 +17,6 @@ interface HistoryRow { key: string; tx_id: string; timestamp: Date; from_hash: s
 interface CountRow { count: bigint }
 
 function array(values: string[]): Prisma.Sql { return values.length ? Prisma.sql`ARRAY[${Prisma.join(values.map((v) => v.toLowerCase()))}]::text[]` : Prisma.sql`ARRAY[]::text[]` }
-function change(today: number, yesterday: number): number { return yesterday === 0 ? (today === 0 ? 0 : 100) : Number((((today - yesterday) / yesterday) * 100).toFixed(1)) }
 function dec(value?: Prisma.Decimal | null): Prisma.Decimal { return value ?? new Prisma.Decimal(0) }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -38,6 +37,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const pattern = `%${search.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`
     const scope = await getWorkspaceReportScope(workspace)
     const range = await parseReportDateRange(url.searchParams)
+    const previousRange = await getPreviousReportRange(range)
     const selectedToken = normalizeAddress(url.searchParams.get('token') ?? '')
     const [tokens, addresses, registry] = await Promise.all([
       prisma.tokenContract.findMany({ where: { OR: [{ workspaceId: workspace }, { active: true, standard: 'KAP-721', aggregateAcrossWorkspaces: true }] }, select: { id: true, workspaceId: true, normalizedAddress: true, name: true, symbol: true, standard: true, imageKey: true, active: true } }),
@@ -122,12 +122,47 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           UNION ALL SELECT d."txId",d."fromHash",d."toHash",d."tokenName",d."tokenSymbol",d."tokenId" FROM "RedemptionTransactionDetail" d WHERE d."timestamp">=${range.start} AND d."timestamp"<${range.end} AND LOWER(d."tokenAddress")=ANY(${kap721}) ${nftAssociation}
         ) SELECT COUNT(*)::bigint count FROM c WHERE ${searchWhere}`),
     ])
+    interface PreviousMetric { metric: string; token_address: string | null; total: Prisma.Decimal }
+    const previousRows = previousRange ? await prisma.$queryRaw<PreviousMetric[]>(Prisma.sql`
+      WITH e AS (SELECT LOWER("tokenAddress") token_address,LOWER("fromHash") from_hash,LOWER("toHash") to_hash,value,"timestamp" FROM "TransactionDetail" WHERE "timestamp">=${previousRange.start} AND "timestamp"<${previousRange.end} AND LOWER("tokenAddress")=ANY(${scoped})),
+      m AS (
+        SELECT 'kap20Distributed'::text metric,NULL::text metric_token,value FROM e WHERE token_address=ANY(${kap20}) AND from_hash=ANY(${swaps}) AND NOT(to_hash=ANY(${registered}))
+        UNION ALL SELECT 'kap20Redeemed',NULL::text,value FROM e WHERE token_address=ANY(${kap20}) AND NOT(from_hash=ANY(${registered})) AND to_hash=ANY(${markets})
+        UNION ALL SELECT 'kap20Fee',NULL::text,value FROM e WHERE token_address=ANY(${kap20}) AND from_hash=ANY(${markets}) AND to_hash=ANY(${marketFees})
+        UNION ALL SELECT 'kap22',token_address,value FROM e WHERE token_address=ANY(${kap22}) AND from_hash=ANY(${pools}) AND NOT(to_hash=ANY(${registered}))
+      ) SELECT metric,metric_token token_address,SUM(value) total FROM m GROUP BY metric,metric_token
+    `) : []
+    const previousNfts = previousRange ? await prisma.$queryRaw<Array<{ metric: string; total: bigint }>>(Prisma.sql`
+      SELECT CASE WHEN LOWER(d."fromHash")=${ZERO} THEN 'mint' ELSE 'burn' END metric,COUNT(*)::bigint total
+      FROM "RedemptionTransactionDetail" d WHERE d."timestamp">=${previousRange.start} AND d."timestamp"<${previousRange.end} AND LOWER(d."tokenAddress")=ANY(${kap721}) ${nftAssociation}
+      AND ((LOWER(d."fromHash")=${ZERO} AND NOT(LOWER(d."toHash")=ANY(${registered}))) OR (LOWER(d."toHash")=${ZERO} AND NOT(LOWER(d."fromHash")=ANY(${registered})))) GROUP BY metric
+    `) : []
+    const previousHeaders = previousRange ? await prisma.$queryRaw<Array<{ total: bigint; fee: Prisma.Decimal }>>(Prisma.sql`
+      WITH e AS (
+        SELECT x."txId",x.fee FROM "TransactionHeader" x WHERE x."timestamp">=${previousRange.start} AND x."timestamp"<${previousRange.end} AND EXISTS(SELECT 1 FROM "TransactionDetail" d WHERE d."txId"=x."txId" AND LOWER(d."tokenAddress")=ANY(${scoped}))
+        UNION ALL SELECT x."txId",x.fee FROM "RedemptionTransactionHeader" x WHERE x."timestamp">=${previousRange.start} AND x."timestamp"<${previousRange.end} AND EXISTS(SELECT 1 FROM "RedemptionTransactionDetail" d WHERE d."txId"=x."txId" AND LOWER(d."tokenAddress")=ANY(${kap721}) ${nftAssociation})
+      ),h AS(SELECT "txId",MAX(fee) fee FROM e GROUP BY "txId") SELECT COUNT(*)::bigint total,COALESCE(SUM(fee),0) fee FROM h
+    `) : []
+    const latest = await prisma.$queryRaw<Array<{ latest: Date | null }>>(Prisma.sql`
+      SELECT MAX("timestamp") latest FROM (
+        SELECT "timestamp" FROM "TransactionDetail" WHERE LOWER("tokenAddress")=ANY(${scoped})
+        UNION ALL SELECT d."timestamp" FROM "RedemptionTransactionDetail" d WHERE LOWER(d."tokenAddress")=ANY(${kap721}) ${nftAssociation}
+      ) x
+    `)
+    const previousPlain = new Map(previousRows.filter((r) => !r.token_address).map((r) => [r.metric, r.total]))
+    const previousPoints = new Map(previousRows.filter((r) => r.token_address).map((r) => [r.token_address, r.total]))
+    const previousNftMap = new Map(previousNfts.map((r) => [r.metric, r.total]))
+    const comparison = (current: string, previous: string): { change: number | null; changeLabel: string } => {
+      if (!previousRange) return { change: null, changeLabel: '' }
+      const before = new Prisma.Decimal(previous); const now = new Prisma.Decimal(current)
+      return { change: before.isZero() ? (now.isZero() ? 0 : null) : now.sub(before).div(before.abs()).mul(100).toDecimalPlaces(1).toNumber(), changeLabel: before.isZero() && !now.isZero() ? 'New activity vs previous period' : 'vs previous equal-length period' }
+    }
     const summary = summaryResult[0] ?? { total_transactions: BigInt(0), total_fee: new Prisma.Decimal(0), today_transactions: BigInt(0), yesterday_transactions: BigInt(0), today_fee: new Prisma.Decimal(0), yesterday_fee: new Prisma.Decimal(0) }
     const plainAmounts = new Map(amounts.filter((r) => !r.token_address).map((r) => [r.metric, r]))
     const kap22Amounts = new Map(amounts.filter((r) => r.token_address).map((r) => [r.token_address as string, r]))
     const nftMap = new Map(nfts.map((r) => [r.metric, r]))
-    const amountMetric = (key: string) => { const r = plainAmounts.get(key); return { value: dec(r?.total).toString(), change: change(dec(r?.today).toNumber(), dec(r?.yesterday).toNumber()) } }
-    const nftMetric = (key: string) => { const r = nftMap.get(key); return { value: String(r?.total ?? BigInt(0)), change: change(Number(r?.today ?? BigInt(0)), Number(r?.yesterday ?? BigInt(0))) } }
+    const amountMetric = (key: string) => { const value = dec(plainAmounts.get(key)?.total).toString(); return { value, ...comparison(value, dec(previousPlain.get(key)).toString()) } }
+    const nftMetric = (key: string) => { const value = String(nftMap.get(key)?.total ?? BigInt(0)); return { value, ...comparison(value, String(previousNftMap.get(key) ?? BigInt(0))) } }
     const total = Number(countResult[0]?.count ?? BigInt(0))
     const tokenByAddress = new Map(tokens.map((token) => [token.normalizedAddress.toLowerCase(), token]))
     const kap20Token = selectedKap20
@@ -139,18 +174,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const hiddenMetric = { value: '0', change: 0 }
     const grossRedeemed = amountMetric('kap20Redeemed')
     const redemptionFee = amountMetric('kap20Fee')
-    const netRedeemed = { value: Prisma.Decimal.max(new Prisma.Decimal(0), new Prisma.Decimal(grossRedeemed.value).sub(redemptionFee.value)).toString(), change: grossRedeemed.change }
-    return NextResponse.json({ timezone: TIME_ZONE, kpis: {
-      totalTransactions: canAccessChart(admin, 'overview.total-transactions') ? { value: String(summary.total_transactions), change: change(Number(summary.today_transactions), Number(summary.yesterday_transactions)) } : hiddenMetric,
+    const netValue = Prisma.Decimal.max(new Prisma.Decimal(0), new Prisma.Decimal(grossRedeemed.value).sub(redemptionFee.value)).toString()
+    const netPrevious = Prisma.Decimal.max(new Prisma.Decimal(0), dec(previousPlain.get('kap20Redeemed')).sub(dec(previousPlain.get('kap20Fee')))).toString()
+    const netRedeemed = { value: netValue, ...comparison(netValue, netPrevious) }
+    const monthlyByLabel = new Map(monthly.map((row) => [row.label, row]))
+    const monthEnd = new Date(`${range.to.slice(0, 7)}-01T00:00:00Z`)
+    const monthStart = new Date(`${range.from.slice(0, 7)}-01T00:00:00Z`)
+    const cappedStart = new Date(monthEnd); cappedStart.setUTCMonth(cappedStart.getUTCMonth() - 11)
+    if (monthStart < cappedStart) monthStart.setTime(cappedStart.getTime())
+    const completeMonths: Array<{ label: string; kap20: number; kap22: number; kap721: number }> = []
+    for (const cursor = new Date(monthStart); cursor <= monthEnd; cursor.setUTCMonth(cursor.getUTCMonth() + 1)) { const label = cursor.toISOString().slice(0, 7); const row = monthlyByLabel.get(label); completeMonths.push({ label, kap20: Number(row?.kap20 ?? 0), kap22: Number(row?.kap22 ?? 0), kap721: Number(row?.kap721 ?? 0) }) }
+    return NextResponse.json({ timezone: TIME_ZONE, period: { from: range.from, to: range.to }, dataThrough: latest[0]?.latest?.toISOString() ?? null, comparison: previousRange ? { from: previousRange.from, to: previousRange.to } : null, kpis: {
+      totalTransactions: canAccessChart(admin, 'overview.total-transactions') ? { value: String(summary.total_transactions), ...comparison(String(summary.total_transactions), String(previousHeaders[0]?.total ?? 0)) } : hiddenMetric,
       dailyGasFee: hiddenMetric,
-      totalGasFee: canAccessChart(admin, 'overview.total-gas-fee') ? { value: dec(summary.total_fee).toFixed(3), change: change(dec(summary.today_fee).toNumber(), dec(summary.yesterday_fee).toNumber()) } : hiddenMetric,
+      totalGasFee: canAccessChart(admin, 'overview.total-gas-fee') ? { value: dec(summary.total_fee).toFixed(3), ...comparison(dec(summary.total_fee).toString(), dec(previousHeaders[0]?.fee).toString()) } : hiddenMetric,
       kap20Distributed: canAccessChart(admin, 'overview.token-distributed') ? { ...amountMetric('kap20Distributed'), imageUrl: tokenImage(kap20Token), symbol: kap20Token?.symbol ?? 'KAP-20' } : hiddenMetric,
       kap20Redeemed: canAccessChart(admin, 'overview.token-redeemed') ? { ...netRedeemed, imageUrl: tokenImage(kap20Token), symbol: kap20Token?.symbol ?? 'KAP-20' } : hiddenMetric,
       redemptionFee: canAccessChart(admin, 'overview.redemption-fee') ? { ...redemptionFee, imageUrl: tokenImage(kap20Token), symbol: kap20Token?.symbol ?? 'KAP-20' } : hiddenMetric,
-      kap22: canAccessChart(admin, 'overview.point-token-distributed') ? orderedKap22.map((t) => { const r = kap22Amounts.get(t.normalizedAddress.toLowerCase()); return { symbol: t.symbol || t.name, imageUrl: tokenImage(t), value: dec(r?.total).toString(), change: change(dec(r?.today).toNumber(), dec(r?.yesterday).toNumber()) } }) : [],
+      kap22: canAccessChart(admin, 'overview.point-token-distributed') ? orderedKap22.map((t) => { const r = kap22Amounts.get(t.normalizedAddress.toLowerCase()); return { symbol: t.symbol || t.name, imageUrl: tokenImage(t), value: dec(r?.total).toString(), ...comparison(dec(r?.total).toString(), dec(previousPoints.get(t.normalizedAddress.toLowerCase())).toString()) } }) : [],
       nftMint: canAccessChart(admin, 'overview.nft-mint') ? { ...nftMetric('mint'), imageUrl: tokenImage(nftToken) } : hiddenMetric,
       nftBurn: canAccessChart(admin, 'overview.nft-burn') ? { ...nftMetric('burn'), imageUrl: tokenImage(nftToken) } : hiddenMetric,
-    }, monthly: showMonthly ? monthly.map((r) => ({ label: r.label, kap20: Number(r.kap20), kap22: Number(r.kap22), kap721: Number(r.kap721) })) : [],
+    }, monthly: showMonthly ? completeMonths : [],
     transactions: showHistory ? { rows: rows.map((r) => ({ key:r.key,txId:r.tx_id,timestamp:r.timestamp.toISOString(),fromHash:r.from_hash,toHash:r.to_hash,fromName:names.get(r.from_hash.toLowerCase())??null,toName:names.get(r.to_hash.toLowerCase())??null,tokenAddress:r.token_address,tokenName:r.token_name,tokenSymbol:r.token_symbol,standard:r.standard,type:r.type,value:r.value,tokenId:r.token_id,status:r.status,imageUrl:r.standard === 'KAP-721' && r.token_id ? `/api/reports/nft-redemptions/image?workspace=${workspace}&contract=${encodeURIComponent(r.token_address)}&tokenId=${encodeURIComponent(r.token_id)}` : tokenImage(tokenByAddress.get(r.token_address)) })), total, page, totalPages: Math.max(1,Math.ceil(total/LIMIT)) } : { rows: [], total: 0, page: 1, totalPages: 1 } })
   } catch (error) {
     if (error instanceof ReportPeriodError) return NextResponse.json({ error: error.message }, { status: 400 })

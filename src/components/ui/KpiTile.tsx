@@ -13,10 +13,13 @@ interface KpiTileProps {
   iconColor?: string
   valueTrailing?: ReactNode
   subLabel?: string
+  changeLabel?: string
+  changeTone?: 'neutral' | 'increase-good' | 'decrease-good'
 }
 
-export function KpiTile({ label, value, change, spark, sparkColor = 'var(--accent)', icon, iconBg, iconColor, valueTrailing, subLabel }: KpiTileProps) {
+export function KpiTile({ label, value, change, spark, sparkColor = 'var(--accent)', icon, iconBg, iconColor, valueTrailing, subLabel, changeLabel, changeTone = 'neutral' }: KpiTileProps) {
   const positive = (change ?? 0) >= 0
+  const changeClass = changeTone === 'neutral' || change === 0 ? 'pill-muted' : (positive === (changeTone === 'increase-good') ? 'pill-success' : 'pill-danger')
   return (
     <div className="glass rounded-2xl p-5 relative overflow-hidden density-card">
       <div className="flex items-start justify-between mb-3">
@@ -30,19 +33,20 @@ export function KpiTile({ label, value, change, spark, sparkColor = 'var(--accen
           </div>
         )}
       </div>
-      <div className="flex min-w-0 items-center gap-2 text-2xl font-semibold tracking-tight text-default"><span className="min-w-0 truncate">{value}</span>{valueTrailing}</div>
+      <div className="flex min-w-0 items-start gap-2 text-[clamp(1.15rem,1.7vw,1.5rem)] font-semibold leading-snug tracking-tight text-default"><span className="min-w-0 [overflow-wrap:anywhere]" title={value}>{value}</span>{valueTrailing ? <span className="mt-0.5 shrink-0">{valueTrailing}</span> : null}</div>
       {subLabel ? <div className="mt-2 text-xs text-muted">{subLabel}</div> : null}
-      <div className="flex items-end justify-between mt-3">
+      {change != null || changeLabel || spark ? <div className="flex flex-wrap items-end justify-between gap-2 mt-3">
         {change != null ? (
-          <div className={`pill ${positive ? 'pill-success' : 'pill-danger'}`}>
+          <div className={`pill ${changeClass}`} title={changeLabel}>
             <Icon name={positive ? 'arrowUp' : 'arrowDown'} size={10} strokeWidth={2.5} />
             {Math.abs(change)}%
+            {changeLabel ? <span className="ml-1 normal-case">{changeLabel}</span> : null}
           </div>
         ) : (
-          <div />
+          changeLabel ? <span className="text-xs text-muted">{changeLabel}</span> : <div />
         )}
         {spark && <Sparkline values={spark} color={sparkColor} width={80} height={28} />}
-      </div>
+      </div> : null}
     </div>
   )
 }

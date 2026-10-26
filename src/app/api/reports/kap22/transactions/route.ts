@@ -1,3 +1,4 @@
+import { parseReportDateRange, ReportPeriodError } from '@/lib/reporting/reportPeriod'
 import { NextRequest, NextResponse } from 'next/server'
 import { getKap22Transactions } from '@/lib/reporting/kap22Analysis'
 import { normalizeAddress, isValidAddress } from '@/lib/system/addresses'
@@ -12,6 +13,7 @@ function boundedInteger(value: string | null, fallback: number, maximum: number)
 }
 
 export async function GET(request: NextRequest) {
+  try {
   const admin = await getCurrentAdmin()
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!canAccessMenu(admin, 'kap22-analysis') || !canAccessChart(admin, 'kap22.transaction-history')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -35,12 +37,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Search must be a transaction ID or wallet address' }, { status: 400 })
   }
   try {
-    const result = await getKap22Transactions(normalizeAddress(token), workspace, page, limit, search)
+    const range = await parseReportDateRange(request.nextUrl.searchParams)
+    const result = await getKap22Transactions(normalizeAddress(token), workspace, page, limit, search, range)
     if (!result) return NextResponse.json({ error: 'Token is not active in the selected scope' }, { status: 400 })
     return NextResponse.json({ ...result, page, limit })
   } catch (error) {
+    if (error instanceof ReportPeriodError) return NextResponse.json({ error: error.message }, { status: 400 })
     if (error instanceof WorkspaceNotFoundError) return NextResponse.json({ error: error.message }, { status: 404 })
     console.error('KAP-22 transactions error:', error)
     return NextResponse.json({ error: 'Failed to load KAP-22 transactions' }, { status: 500 })
   }
+  } catch (error) { if (error instanceof ReportPeriodError) return NextResponse.json({ error: error.message }, { status: 400 }); console.error('Token report error:', error instanceof Error ? error.message : 'unknown'); return NextResponse.json({ error: 'Unable to load token report' }, { status: 500 }) }
 }

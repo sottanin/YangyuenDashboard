@@ -1,6 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { BarChart } from '@/components/charts/BarChart'
+import { ReportScope } from '@/components/reports/ReportScope'
 import { NftRedemptionBarChart, type NftRedemptionBarPoint } from '@/components/charts/NftRedemptionBarChart'
 import { Card } from '@/components/ui/Card'
 import { ErrorCard } from '@/components/ui/ErrorCard'
@@ -15,7 +17,7 @@ import { AddressLink } from '@/components/ui/AddressLink'
 import { ReportFilters, type ReportTokenOption } from '@/components/reports/ReportFilters'
 import type { ReportPeriod } from '@/lib/reporting/reportPeriod'
 
-interface SummaryResponse { nftMint: number; nftBurn: number; nftSymbol: string; nftImageUrl: string | null; kap20Burn: string; kap20Fee: string; kap20Symbol: string; kap20ImageUrl: string | null; timezone: string }
+interface SummaryResponse { nftMint: number; nftBurn: number; nftSymbol: string; nftImageUrl: string | null; kap20Burn: string; kap20Fee: string; kap20Symbol: string; kap20ImageUrl: string | null; timezone: string; period: { from: string; to: string }; comparisonPeriod: { from: string; to: string } | null; previous: { nftMint: number | null; nftBurn: number | null; kap20Burn: string | null; kap20Fee: string | null } | null; trend: Array<{ label: string; issued?: number; used?: number }>; currentInventory: { active: number; used: number; unknown: number } | null; dataThrough: string | null }
 interface TransactionRow {
   id: string
   txId: string
@@ -45,7 +47,7 @@ function formatAmount(value: string): string {
   return `${sign}${integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${decimal ? `.${decimal}` : ''}`
 }
 function formatTimestamp(value: string, timezone: string): string {
-  return new Intl.DateTimeFormat('en-GB', { timeZone: timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+  return new Intl.DateTimeFormat('th-TH', { timeZone: timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 async function readResponse<T>(response: Response): Promise<T> {
   const data: unknown = await response.json()
@@ -54,6 +56,12 @@ async function readResponse<T>(response: Response): Promise<T> {
     throw new Error(message)
   }
   return data as T
+}
+function comparison(current: number | string, previous: number | string | null | undefined): { change?: number; changeLabel?: string; subLabel?: string } {
+  if (previous === null || previous === undefined) return {}
+  const base=Number(previous);const value=Number(current)
+  if(base===0)return {subLabel:value===0?'ไม่มีรายการในทั้งสองช่วง':'มีกิจกรรมใหม่ โดยช่วงก่อนหน้าไม่พบรายการ'}
+  return {change:Math.round((value-base)/Math.abs(base)*1000)/10,changeLabel:'เทียบกับช่วงก่อนหน้าที่มีจำนวนวันเท่ากัน'}
 }
 export default function NftRedemptionsPage(): React.JSX.Element {
   const { canViewChart } = useChartPermissions()
@@ -93,7 +101,7 @@ export default function NftRedemptionsPage(): React.JSX.Element {
   const [historyStart, setHistoryStart] = useState('')
   const [today, setToday] = useState('')
   const requestIds = useRef({ summary: 0, chart: 0, table: 0 })
-  const customError = period === 'custom' ? (!customFrom || !customTo ? 'Select both From and To dates.' : customFrom > customTo ? 'From date must be on or before To date.' : customTo > today ? 'To date cannot be in the future.' : customFrom < historyStart ? 'From date cannot be before the business history start.' : '') : ''
+  const customError = period === 'custom' ? (!customFrom || !customTo ? 'กรุณาเลือกวันเริ่มต้นและวันสิ้นสุด' : customFrom > customTo ? 'วันเริ่มต้นต้องไม่เกินวันสิ้นสุด' : customTo > today ? 'วันสิ้นสุดต้องไม่เกินวันนี้' : customFrom < historyStart ? 'From date cannot be before the business history start.' : '') : ''
   const reportParams = useCallback((): URLSearchParams => {
     const params = new URLSearchParams({ workspace, token: selectedToken, period })
     if (period === 'custom') { params.set('from', customFrom); params.set('to', customTo) }
@@ -179,29 +187,34 @@ export default function NftRedemptionsPage(): React.JSX.Element {
   return <div className="min-w-0 max-w-full">
     <PageHeader title="NFT Redemptions (KAP-721)" subtitle="ภาพรวมการสร้าง การใช้งาน NFT ยอดชำระ และค่าธรรมเนียม Marketplace" actions={hasVisibleContent ? <ReportFilters idPrefix="nft-redemptions" tokens={tokens} token={selectedToken} period={period} customFrom={customFrom} customTo={customTo} disabled={tokensLoading} minDate={historyStart} maxDate={today} onTokenChange={(value) => { setSelectedToken(value); setPage(1) }} onPeriodChange={(value) => { setPeriod(value); setPage(1) }} onCustomFromChange={(value) => { setCustomFrom(value); setPage(1) }} onCustomToChange={(value) => { setCustomTo(value); setPage(1) }} /> : undefined} />
 
+    {summary && !summaryLoading && !summaryError ? <ReportScope from={summary.period.from} to={summary.period.to} timezone={summary.timezone} dataThrough={summary.dataThrough} comparisonNote={summary.comparisonPeriod?`เทียบกับช่วง ${summary.comparisonPeriod.from} ถึง ${summary.comparisonPeriod.to} ข้อมูลของวันปัจจุบันอาจยังไม่ครบ`:'ยังไม่มีช่วงก่อนหน้าที่นำมาเทียบได้ เมื่อเลือกข้อมูลทั้งหมดหรือมีประวัติย้อนหลังไม่เพียงพอ'} scopeNote="ยอดออกและใช้ voucher นับตามวันที่เลือก ส่วนจำนวนที่ยังเหลือใช้ดูจากสถานะล่าสุดของแต่ละใบ ไม่เปลี่ยนตามตัวกรองวันที่ หน้านี้รวมใบที่ซ่อนจากหน้ารายการ voucher ด้วย จึงอาจมียอดต่างกัน"/>:null}
     {tokensError ? <div className="mb-4"><ErrorCard message={tokensError} onRetry={() => void loadTokens()} /></div> : null}
     {customError ? <div className="mb-4" role="alert"><ErrorCard message={customError} /></div> : null}
-    {!tokensLoading && !tokensError && tokens.length === 0 ? <Card><div className="py-12 text-center"><div className="text-sm font-medium text-default">No active KAP-20 tokens</div><p className="mt-1 text-xs text-muted">Add an active primary token contract in the registry.</p></div></Card> : null}
+    {!tokensLoading && !tokensError && tokens.length === 0 ? <Card><div className="py-12 text-center"><div className="text-sm font-medium text-default">ยังไม่มีโทเคน KAP-20 ที่เปิดใช้งาน</div><p className="mt-1 text-xs text-muted">กรุณาให้ผู้ดูแลเพิ่มโทเคนหลักที่เปิดใช้งานก่อนดูรายงาน</p></div></Card> : null}
 
-    {!hasVisibleContent ? <section role="status" className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-default px-6 py-12 text-center"><h2 className="text-base font-semibold text-default">No report content available</h2><p className="mt-2 max-w-md text-sm text-muted">Your role allows access to this menu, but no charts or content are assigned. Contact an administrator if you need access.</p></section> : null}
+    {!hasVisibleContent ? <section role="status" className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-default px-6 py-12 text-center"><h2 className="text-base font-semibold text-default">ยังไม่มีรายงานให้แสดง</h2><p className="mt-2 max-w-md text-sm text-muted">คุณเปิดเมนูนี้ได้ แต่ยังไม่ได้รับสิทธิ์ดูกราฟหรือข้อมูล กรุณาติดต่อผู้ดูแลหากต้องการใช้งาน</p></section> : null}
 
     {canViewKpis && tokens.length > 0 && !customError && !tokensError && <div>{summaryError ? <div className="mb-4"><ErrorCard message={summaryError} onRetry={() => void loadSummary()} /></div> : summaryLoading || tokensLoading || !summary ? <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: [canViewNftMint, canViewNftBurn, canViewKap20Burn, canViewKap20Fee].filter(Boolean).length }, (_, index) => <SkeletonKpi key={index} />)}</div> : <section className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="NFT redemption key performance indicators">
-      {canViewNftMint && <KpiTile label="NFT Mint" value={`${summary.nftMint.toLocaleString()} NFTs`} valueTrailing={<TokenAvatar src={summary.nftImageUrl} symbol={summary.nftSymbol} size="sm" />} icon="arrowUp" sparkColor="var(--success)" />}
-      {canViewNftBurn && <KpiTile label="NFT Burn" value={`${summary.nftBurn.toLocaleString()} NFTs`} valueTrailing={<TokenAvatar src={summary.nftImageUrl} symbol={summary.nftSymbol} size="sm" />} icon="flame" sparkColor="var(--danger)" />}
-      {canViewKap20Burn && <KpiTile label="Token (KAP-20) Burn" value={`${formatAmount(summary.kap20Burn)} ${summary.kap20Symbol}`} valueTrailing={<TokenAvatar src={summary.kap20ImageUrl} symbol={summary.kap20Symbol} size="sm" />} icon="refresh" sparkColor="var(--danger)" />}
-      {canViewKap20Fee && <KpiTile label="Token (KAP-20) Fee" value={`${formatAmount(summary.kap20Fee)} ${summary.kap20Symbol}`} valueTrailing={<TokenAvatar src={summary.kap20ImageUrl} symbol={summary.kap20Symbol} size="sm" />} icon="target" sparkColor="var(--warn)" />}
+      {canViewNftMint && <KpiTile label="Vouchers issued (Mint)" subLabel="จำนวน voucher ที่ออกให้ผู้ใช้ในช่วงวันที่เลือก" {...comparison(summary.nftMint,summary.previous?.nftMint)} value={`${summary.nftMint.toLocaleString()} NFTs`} valueTrailing={<TokenAvatar src={summary.nftImageUrl} symbol={summary.nftSymbol} size="sm" />} icon="arrowUp" sparkColor="var(--success)" />}
+      {canViewNftBurn && <KpiTile label="Vouchers used (Burn)" subLabel="จำนวน voucher ที่ใช้แล้วในช่วงวันที่เลือก" {...comparison(summary.nftBurn,summary.previous?.nftBurn)} value={`${summary.nftBurn.toLocaleString()} NFTs`} valueTrailing={<TokenAvatar src={summary.nftImageUrl} symbol={summary.nftSymbol} size="sm" />} icon="flame" sparkColor="var(--danger)" />}
+      {canViewKap20Burn && <KpiTile label="Marketplace payment · net of fee" subLabel="โทเคนที่ใช้แลกสิทธิ์ในช่วงวันที่เลือก ไม่รวมค่าธรรมเนียม" {...comparison(summary.kap20Burn,summary.previous?.kap20Burn)} value={`${formatAmount(summary.kap20Burn)} ${summary.kap20Symbol}`} valueTrailing={<TokenAvatar src={summary.kap20ImageUrl} symbol={summary.kap20Symbol} size="sm" />} icon="refresh" sparkColor="var(--danger)" />}
+      {canViewKap20Fee && <KpiTile label="Marketplace fee" subLabel="ค่าธรรมเนียมการแลกสิทธิ์ในช่วงวันที่เลือก" {...comparison(summary.kap20Fee,summary.previous?.kap20Fee)} value={`${formatAmount(summary.kap20Fee)} ${summary.kap20Symbol}`} valueTrailing={<TokenAvatar src={summary.kap20ImageUrl} symbol={summary.kap20Symbol} size="sm" />} icon="target" sparkColor="var(--warn)" />}
     </section>}</div>}
 
+    {!summaryLoading && !summaryError && summary && !customError && (canViewNftMint || canViewNftBurn) ? <>
+      {canViewNftMint && canViewNftBurn && summary.currentInventory ? <Card className="mb-4" title="Current observed outstanding vouchers" subtitle="ดูสถานะล่าสุดของ voucher แต่ละใบจากประวัติที่มี ไม่ใช่การนำยอดออกลบยอดใช้เฉพาะช่วงวันที่เลือก">{summary.dataThrough ? <div className="grid gap-4 sm:grid-cols-3"><div><p className="text-xs text-muted">ยังอยู่กับผู้ใช้</p><p className="mt-1 text-2xl font-semibold text-default">{summary.currentInventory.active.toLocaleString()}</p></div><div><p className="text-xs text-muted">ใช้แล้ว</p><p className="mt-1 text-2xl font-semibold text-default">{summary.currentInventory.used.toLocaleString()}</p></div><div><p className="text-xs text-muted">ยังไม่ทราบสถานะหรืออยู่กับระบบ</p><p className="mt-1 text-2xl font-semibold text-default">{summary.currentInventory.unknown.toLocaleString()}</p></div></div>:<p className="text-sm text-muted">ยังสรุปจำนวนคงเหลือไม่ได้ เพราะยังไม่มีประวัติของ voucher ที่ใช้ตรวจสอบสถานะ</p>}<p className="mt-3 text-xs text-muted">สรุปจากประวัติที่ระบบมี หากข้อมูลยังไม่ครบ อาจมีบางใบที่ยังไม่ถูกนับ จำนวนนี้ยังไม่รวมการตรวจวันหมดอายุหรือเงื่อนไขการใช้สิทธิ์</p></Card>:null}
+      <Card className="mb-4" title="Vouchers issued and used over time" subtitle="เปรียบเทียบจำนวน voucher ที่ออกและใช้ในแต่ละวัน ใบที่ใช้ในช่วงนี้อาจได้รับมาก่อนช่วงที่เลือก จึงไม่ควรนำสองยอดนี้มาหารเป็นอัตราการใช้ วันที่แสดงศูนย์หมายถึงยังไม่พบรายการในข้อมูลที่มี">{summary.trend.length ? <BarChart data={summary.trend} keys={[...(canViewNftMint?[{key:'issued',label:'Issued',color:'var(--success)'}]:[]),...(canViewNftBurn?[{key:'used',label:'Used',color:'var(--accent)'}]:[])]} tooltipValueFormat="integer" showLegend height={280}/>:<div className="flex h-60 items-center justify-center text-sm text-muted">ยังไม่พบการใช้งานในช่วงนี้</div>}</Card>
+    </>:null}
     {canViewRankings && tokens.length > 0 && !customError && !tokensError && <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-2" aria-label="NFT rankings">
-      {canViewTopRedemptions && <Card title="Top 10 NFT Redemptions" subtitle="จัดอันดับ NFT 10 รายการที่ถูกแลกมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
-        {chartError ? <ErrorCard message={chartError} onRetry={() => void loadChart()} /> : chartLoading ? <div className="h-[340px] shimmer rounded-xl" /> : topNfts.length === 0 ? <div className="flex h-[280px] items-center justify-center text-sm text-muted">No minted NFT redemption data found</div> : <NftRedemptionBarChart data={topNfts} />}
+      {canViewTopRedemptions && <Card title="Top 10 vouchers issued" subtitle="จัดอันดับ NFT 10 รายการที่ถูกแลกมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
+        {chartError ? <ErrorCard message={chartError} onRetry={() => void loadChart()} /> : chartLoading ? <div className="h-[340px] shimmer rounded-xl" /> : topNfts.length === 0 ? <div className="flex h-[280px] items-center justify-center text-sm text-muted">ยังไม่พบรายการออก voucher ในช่วงนี้</div> : <NftRedemptionBarChart data={topNfts} />}
       </Card>}
-      {canViewTopBurns && <Card title="Top 10 NFT Burn" subtitle="จัดอันดับ NFT 10 รายการที่ถูกใช้งานมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
-        {chartError ? <ErrorCard message={chartError} onRetry={() => void loadChart()} /> : chartLoading ? <div className="h-[340px] shimmer rounded-xl" /> : topBurns.length === 0 ? <div className="flex h-[280px] items-center justify-center text-sm text-muted">No burned NFT data found</div> : <NftRedemptionBarChart data={topBurns} variant="burn" />}
+      {canViewTopBurns && <Card title="Top 10 vouchers used" subtitle="จัดอันดับ NFT 10 รายการที่ถูกใช้งานมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
+        {chartError ? <ErrorCard message={chartError} onRetry={() => void loadChart()} /> : chartLoading ? <div className="h-[340px] shimmer rounded-xl" /> : topBurns.length === 0 ? <div className="flex h-[280px] items-center justify-center text-sm text-muted">ยังไม่พบรายการใช้ voucher ในช่วงนี้</div> : <NftRedemptionBarChart data={topBurns} variant="burn" />}
       </Card>}
     </section>}
 
-    {canViewHistory && tokens.length > 0 && !customError && !tokensError && <Card title="Transaction History" subtitle="ตารางแสดงธุรกรรม NFT ทั้งหมด พร้อม Token ID ผู้ส่ง ผู้รับ และสถานะธุรกรรม" noPad>
+    {canViewHistory && tokens.length > 0 && !customError && !tokensError && <Card title="NFT Event History" subtitle="ตารางแสดงธุรกรรม NFT ทั้งหมด พร้อม Token ID ผู้ส่ง ผู้รับ และสถานะธุรกรรม" noPad>
       <div className="border-b border-default p-4 sm:p-5">
         <label htmlFor="nft-redemption-search" className="sr-only">Search NFT redemption transactions</label>
         <div className="relative max-w-xl">
@@ -209,9 +222,9 @@ export default function NftRedemptionsPage(): React.JSX.Element {
           {searchInput ? <button type="button" className="absolute right-10 top-1/2 -translate-y-1/2 text-xs text-muted hover:text-default" onClick={() => setSearchInput('')}>Clear</button> : null}
           <Icon name="search" size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-faint" />
         </div>
-        {searchInput.trim().length === 1 ? <p className="mt-1.5 text-xs text-muted">Enter at least 2 characters to search.</p> : null}
+        {searchInput.trim().length === 1 ? <p className="mt-1.5 text-xs text-muted">กรอกอย่างน้อย 2 ตัวอักษรเพื่อค้นหา</p> : null}
       </div>
-      {tableError ? <div className="p-5"><ErrorCard message={tableError} onRetry={() => void loadTransactions(page, search)} /></div> : tableLoading || !transactions ? <div className="p-5"><SkeletonTable rows={7} /></div> : transactions.rows.length === 0 ? <div className="py-16 text-center"><div className="text-sm font-medium text-default">No NFT transactions found</div><p className="mt-1 text-xs text-muted">{search ? `No results match “${search}”.` : 'Run NFT Redemption Sync to populate this report.'}</p></div> : <>
+      {tableError ? <div className="p-5"><ErrorCard message={tableError} onRetry={() => void loadTransactions(page, search)} /></div> : tableLoading || !transactions ? <div className="p-5"><SkeletonTable rows={7} /></div> : transactions.rows.length === 0 ? <div className="py-16 text-center"><div className="text-sm font-medium text-default">ไม่พบรายการ NFT</div><p className="mt-1 text-xs text-muted">{search ? `ไม่พบรายการที่ตรงกับ “${search}”` : 'เมื่ออัปเดตประวัติการรับและใช้ NFT แล้ว ข้อมูลจะแสดงที่นี่'}</p></div> : <>
         <div className="w-full min-w-0 overflow-x-auto thin-scroll" tabIndex={0} role="region" aria-label="Scrollable NFT redemption transaction table"><table className="min-w-[1080px] w-full text-sm">
           <caption className="sr-only">NFT redemption transaction events</caption>
           <thead><tr className="border-b border-default text-[10.5px] uppercase tracking-wider text-faint"><th scope="col" className="px-5 py-3 text-left font-medium">Transaction</th><th scope="col" className="px-3 py-3 text-left font-medium">Type</th><th scope="col" className="px-3 py-3 text-left font-medium">From</th><th scope="col" className="px-3 py-3 text-left font-medium">To</th><th scope="col" className="px-3 py-3 text-left font-medium">NFT</th><th scope="col" className="px-3 py-3 text-left font-medium">Token ID</th><th scope="col" className="px-3 py-3 text-right font-medium">Token Value</th><th scope="col" className="px-3 py-3 text-right font-medium">Amount</th><th scope="col" className="px-3 py-3 text-left font-medium">Time</th><th scope="col" className="px-3 py-3 text-left font-medium">Status</th></tr></thead>

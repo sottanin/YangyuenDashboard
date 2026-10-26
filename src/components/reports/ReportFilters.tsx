@@ -17,6 +17,7 @@ interface Props {
   disabled?: boolean
   minDate?: string
   maxDate: string
+  tokenLabel?: string
   onTokenChange: (value: string) => void
   onPeriodChange: (value: ReportPeriod) => void
   onCustomFromChange: (value: string) => void
@@ -48,7 +49,7 @@ export function ReportFilters(props: Props): React.JSX.Element {
   }
   return <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-end sm:justify-end">
     <div ref={rootRef} className="relative flex min-w-0 flex-col gap-1 text-xs font-medium text-muted sm:w-64">
-      <span id={`${props.idPrefix}-token-label`}>Point Token</span>
+      <span id={`${props.idPrefix}-token-label`}>{props.tokenLabel ?? 'Primary Token (KAP-20)'}</span>
       <button type="button" className="input flex min-h-11 w-full items-center gap-2 text-left" aria-labelledby={`${props.idPrefix}-token-label ${props.idPrefix}-token-value`} aria-haspopup="listbox" aria-expanded={open} disabled={props.disabled || props.tokens.length === 0} onClick={() => { if (!open) setActiveIndex(selectedIndex); setOpen((value) => !value) }} onKeyDown={handleKeyDown}>
         {selected ? <><TokenAvatar src={selected.imageUrl} symbol={selected.symbol} size="sm" /><span id={`${props.idPrefix}-token-value`} className="min-w-0 flex-1 truncate text-default">{cleanTokenName(selected.name, selected.symbol)}</span><span className="font-mono text-[11px] text-muted">{selected.symbol}</span></> : <span id={`${props.idPrefix}-token-value`} className="flex-1">No active KAP-20 tokens</span>}
         <Icon name="chevR" size={12} className={`shrink-0 transition-transform ${open ? '-rotate-90' : 'rotate-90'}`} />

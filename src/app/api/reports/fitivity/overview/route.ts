@@ -2,18 +2,24 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { allowedWorkspaceIds, canAccessChart, canAccessMenu, getCurrentAdmin } from '@/lib/auth/admin'
 import { prisma } from '@/lib/prisma'
-import { getReportDateBounds, parseReportDateRange, ReportPeriodError } from '@/lib/reporting/reportPeriod'
+import { getPreviousReportRange, getReportDateBounds, parseReportDateRange, ReportPeriodError } from '@/lib/reporting/reportPeriod'
 
 interface TotalRow {
   steps_total: Prisma.Decimal
   steps_users: bigint
+  steps_person_days: bigint
+  steps_days: bigint
   calories_total: Prisma.Decimal
   calories_users: bigint
+  calories_person_days: bigint
+  calories_days: bigint
   sleep_total: Prisma.Decimal
   sleep_users: bigint
+  sleep_person_days: bigint
+  sleep_days: bigint
 }
 interface DailyRow { date: string; metric: string; total: Prisma.Decimal; user_count: bigint }
-interface TopRow { metric: string; user_id: string; total: Prisma.Decimal }
+interface TopRow { metric: string; user_id: string; total: Prisma.Decimal; daily_average: Prisma.Decimal; reported_days: bigint }
 interface DistributionRow { metric: string; bucket: number; user_count: bigint }
 interface UserSummaryRow {
   user_id: string
@@ -23,6 +29,9 @@ interface UserSummaryRow {
   average_calories: Prisma.Decimal
   total_sleep: Prisma.Decimal
   average_sleep: Prisma.Decimal
+  steps_days: bigint
+  calories_days: bigint
+  sleep_days: bigint
 }
 
 const SLEEP_TYPES = ['sleep_deep', 'sleep_light', 'sleep_rem']
@@ -67,18 +76,32 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const needsDistribution = visibility.stepsDistribution || visibility.caloriesDistribution || visibility.sleepDistribution
     const needsUserSummary = visibility.userSummary
 
-    const [totalRows, dailyRows, topRows, distributionRows, userSummaryRows] = await Promise.all([
-      needsTotals ? prisma.$queryRaw<TotalRow[]>(Prisma.sql`
+    if (!Object.values(visibility).some(Boolean)) return NextResponse.json({ error: 'No Fitivity charts are assigned' }, { status: 403 })
+    const previousRange = needsTotals ? await getPreviousReportRange(range) : null
+    const totalsQuery = (from: string, to: string): Promise<TotalRow[]> => prisma.$queryRaw<TotalRow[]>(Prisma.sql`
         SELECT
           COALESCE(SUM("totalValue") FILTER (WHERE "metricType"='steps'),0) steps_total,
           COUNT(DISTINCT "userId") FILTER (WHERE "metricType"='steps')::bigint steps_users,
+          COUNT(DISTINCT ("userId",date)) FILTER (WHERE "metricType"='steps')::bigint steps_person_days,
+          COUNT(DISTINCT date) FILTER (WHERE "metricType"='steps')::bigint steps_days,
           COALESCE(SUM("totalValue") FILTER (WHERE "metricType"='active_energy_burned'),0) calories_total,
           COUNT(DISTINCT "userId") FILTER (WHERE "metricType"='active_energy_burned')::bigint calories_users,
+          COUNT(DISTINCT ("userId",date)) FILTER (WHERE "metricType"='active_energy_burned')::bigint calories_person_days,
+          COUNT(DISTINCT date) FILTER (WHERE "metricType"='active_energy_burned')::bigint calories_days,
           COALESCE(SUM("totalValue") FILTER (WHERE "metricType" IN (${Prisma.join(SLEEP_TYPES)})),0)/60 sleep_total,
-          COUNT(DISTINCT "userId") FILTER (WHERE "metricType" IN (${Prisma.join(SLEEP_TYPES)}))::bigint sleep_users
+          COUNT(DISTINCT "userId") FILTER (WHERE "metricType" IN (${Prisma.join(SLEEP_TYPES)}))::bigint sleep_users,
+          COUNT(DISTINCT ("userId",date)) FILTER (WHERE "metricType" IN (${Prisma.join(SLEEP_TYPES)}))::bigint sleep_person_days,
+          COUNT(DISTINCT date) FILTER (WHERE "metricType" IN (${Prisma.join(SLEEP_TYPES)}))::bigint sleep_days
         FROM "FitivityData"
-        WHERE "workspaceId"=${workspaceId} AND "isCal"=true AND date BETWEEN ${range.from}::date AND ${range.to}::date
-      `) : Promise.resolve([] as TotalRow[]),
+        WHERE "workspaceId"=${workspaceId} AND "isCal"=true AND date BETWEEN ${from}::date AND ${to}::date
+      `)
+    const allowedTypes = visibility.userSummary ? ['steps', 'active_energy_burned', ...SLEEP_TYPES] : [
+      ...(visibility.totalSteps || visibility.stepsTrend || visibility.topSteps || visibility.stepsDistribution ? ['steps'] : []),
+      ...(visibility.totalCalories || visibility.caloriesTrend || visibility.topCalories || visibility.caloriesDistribution ? ['active_energy_burned'] : []),
+      ...(visibility.totalSleep || visibility.sleepTrend || visibility.topSleep || visibility.sleepDistribution ? SLEEP_TYPES : []),
+    ]
+    const [totalRows, dailyRows, topRows, distributionRows, userSummaryRows, previousRows, latestRecord] = await Promise.all([
+      needsTotals ? totalsQuery(range.from, range.to) : Promise.resolve([] as TotalRow[]),
       needsDaily ? prisma.$queryRaw<DailyRow[]>(Prisma.sql`
         WITH base AS (
           SELECT date,"userId",
@@ -93,15 +116,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       `) : Promise.resolve([] as DailyRow[]),
       needsTop ? prisma.$queryRaw<TopRow[]>(Prisma.sql`
         WITH base AS (
-          SELECT "userId",
+          SELECT date,"userId",
             CASE WHEN "metricType"='steps' THEN 'steps' WHEN "metricType"='active_energy_burned' THEN 'calories' ELSE 'sleep' END metric,
             CASE WHEN "metricType" IN (${Prisma.join(SLEEP_TYPES)}) THEN "totalValue"/60 ELSE "totalValue" END value
           FROM "FitivityData"
           WHERE "workspaceId"=${workspaceId} AND "isCal"=true AND date BETWEEN ${range.from}::date AND ${range.to}::date
             AND "metricType" IN ('steps','active_energy_burned',${Prisma.join(SLEEP_TYPES)})
-        ), totals AS (SELECT metric,"userId" user_id,SUM(value) total FROM base GROUP BY metric,"userId"),
-        ranked AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY metric ORDER BY total DESC,user_id) rank FROM totals)
-        SELECT metric,user_id,total FROM ranked WHERE rank<=10 ORDER BY metric,rank
+        ), totals AS (SELECT metric,"userId" user_id,SUM(value) total,COUNT(DISTINCT date)::bigint reported_days,SUM(value)/NULLIF(COUNT(DISTINCT date),0) daily_average FROM base GROUP BY metric,"userId"),
+        ranked AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY metric ORDER BY daily_average DESC,reported_days DESC,user_id) rank FROM totals)
+        SELECT metric,user_id,total,daily_average,reported_days FROM ranked WHERE rank<=10 ORDER BY metric,rank
       `) : Promise.resolve([] as TopRow[]),
       needsDistribution ? prisma.$queryRaw<DistributionRow[]>(Prisma.sql`
         WITH base AS (
@@ -138,7 +161,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         ), daily AS (
           SELECT date,"userId",metric,SUM(value) daily_total FROM base GROUP BY date,"userId",metric
         ), per_user AS (
-          SELECT "userId",metric,SUM(daily_total) total,AVG(daily_total) average FROM daily GROUP BY "userId",metric
+          SELECT "userId",metric,SUM(daily_total) total,AVG(daily_total) average,COUNT(*) reported_days FROM daily GROUP BY "userId",metric
         )
         SELECT "userId" user_id,
           COALESCE(MAX(total) FILTER (WHERE metric='steps'),0) total_steps,
@@ -146,9 +169,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           COALESCE(MAX(total) FILTER (WHERE metric='calories'),0) total_calories,
           COALESCE(MAX(average) FILTER (WHERE metric='calories'),0) average_calories,
           COALESCE(MAX(total) FILTER (WHERE metric='sleep'),0) total_sleep,
-          COALESCE(MAX(average) FILTER (WHERE metric='sleep'),0) average_sleep
+          COALESCE(MAX(average) FILTER (WHERE metric='sleep'),0) average_sleep,
+          COALESCE(MAX(reported_days) FILTER (WHERE metric='steps'),0)::bigint steps_days,
+          COALESCE(MAX(reported_days) FILTER (WHERE metric='calories'),0)::bigint calories_days,
+          COALESCE(MAX(reported_days) FILTER (WHERE metric='sleep'),0)::bigint sleep_days
         FROM per_user GROUP BY "userId" ORDER BY "userId"
       `) : Promise.resolve([] as UserSummaryRow[]),
+      previousRange ? totalsQuery(previousRange.from, previousRange.to) : Promise.resolve([] as TotalRow[]),
+      prisma.fitivityData.aggregate({ where: { workspaceId, isCal: true, metricType: { in: allowedTypes } }, _max: { date: true } }),
     ])
 
     // Resolve display identity after aggregation so multiple wallets never multiply metrics.
@@ -167,36 +195,48 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
 
     const totals = totalRows[0] ?? {
-      steps_total: new Prisma.Decimal(0), steps_users: BigInt(0), calories_total: new Prisma.Decimal(0), calories_users: BigInt(0), sleep_total: new Prisma.Decimal(0), sleep_users: BigInt(0),
+      steps_total: new Prisma.Decimal(0), steps_users: BigInt(0), steps_person_days: BigInt(0), steps_days: BigInt(0), calories_total: new Prisma.Decimal(0), calories_users: BigInt(0), calories_person_days: BigInt(0), calories_days: BigInt(0), sleep_total: new Prisma.Decimal(0), sleep_users: BigInt(0), sleep_person_days: BigInt(0), sleep_days: BigInt(0),
     }
-    const dailyByMetric = new Map<string, Array<{ date: string; average: string; accumulated: string }>>()
+    const dailyByMetric = new Map<string, Array<{ date: string; average: string; accumulated: string; users: number }>>()
     const running = new Map<string, Prisma.Decimal>()
     for (const row of dailyRows) {
       const accumulated = (running.get(row.metric) ?? new Prisma.Decimal(0)).add(row.total)
       running.set(row.metric, accumulated)
       const points = dailyByMetric.get(row.metric) ?? []
-      points.push({ date: row.date, average: average(row.total, row.user_count), accumulated: accumulated.toString() })
+      points.push({ date: row.date, average: average(row.total, row.user_count), accumulated: accumulated.toString(), users: Number(row.user_count) })
       dailyByMetric.set(row.metric, points)
     }
-    const topByMetric = (metric: string): Array<{ label: string; value: string }> => topRows.filter((row) => row.metric === metric).map((row) => ({ label: identity(row.user_id), value: row.total.toString() }))
+    const topByMetric = (metric: string): Array<{ label: string; value: string; walletAddress?: string; detail: string }> => topRows.filter((row) => row.metric === metric).map((row) => ({ label: identity(row.user_id), walletAddress: identity(row.user_id).split(', ').find((wallet) => /^0x[0-9a-f]{40}$/i.test(wallet)), value: row.daily_average.toString(), detail: `${Number(row.reported_days)} reported days` }))
     const distributionLabels: Record<string, string[]> = {
-      steps: ['0–2,000 steps/day', '2,001–4,000 steps/day', '4,001–6,000 steps/day', '6,001–8,000 steps/day', '8,001–10,000 steps/day', '10,001–20,000 steps/day', '20,001+ steps/day'],
-      calories: ['0–100 kcal/day', '101–200 kcal/day', '201–300 kcal/day', '301–400 kcal/day', '401–500 kcal/day', '501+ kcal/day'],
-      sleep: ['0–3 hrs/day', '4–6 hrs/day', '7+ hrs/day'],
+      steps: ['≤2,000 steps/day', '>2,000–4,000 steps/day', '>4,000–6,000 steps/day', '>6,000–8,000 steps/day', '>8,000–10,000 steps/day', '>10,000–20,000 steps/day', '>20,000 steps/day'],
+      calories: ['≤100 kcal/day', '>100–200 kcal/day', '>200–300 kcal/day', '>300–400 kcal/day', '>400–500 kcal/day', '>500 kcal/day'],
+      sleep: ['<4 hrs/day', '4–<7 hrs/day', '7+ hrs/day'],
     }
     const distributionByMetric = (metric: string): Array<{ label: string; count: number }> => {
       const counts = new Map(distributionRows.filter((row) => row.metric === metric).map((row) => [row.bucket, Number(row.user_count)]))
       return distributionLabels[metric].map((label, bucket) => ({ label, count: counts.get(bucket) ?? 0 }))
     }
 
+    const periodDays = Math.round((Date.parse(range.to) - Date.parse(range.from)) / 86_400_000) + 1
+    const metricKpi = (metric: 'steps' | 'calories' | 'sleep') => {
+      const total = totals[`${metric}_total`], users = Number(totals[`${metric}_users`]), personDays = Number(totals[`${metric}_person_days`])
+      const currentAverage = average(total, BigInt(personDays))
+      const previous = previousRows[0]
+      const previousAverage = previous && previous[`${metric}_person_days`] > BigInt(0) ? average(previous[`${metric}_total`], previous[`${metric}_person_days`]) : null
+      const previousNumber = previousAverage === null ? null : Number(previousAverage)
+      const change = previousNumber !== null && previousNumber > 0 && personDays > 0 ? Number(((Number(currentAverage) - previousNumber) / previousNumber * 100).toFixed(1)) : null
+      return { total: total.toString(), average: personDays ? currentAverage : null, users, personDays, daysReported: Number(totals[`${metric}_days`]), coverage: users > 0 ? Number((personDays / (users * periodDays) * 100).toFixed(1)) : null, previousAverage, change }
+    }
     return NextResponse.json({
       workspace,
       period: { from: range.from, to: range.to, ...bounds },
       visibility,
+      dataThrough: latestRecord._max.date?.toISOString().slice(0, 10) ?? null,
+      previousPeriod: previousRange ? { from: previousRange.from, to: previousRange.to } : null,
       kpis: {
-        steps: visibility.totalSteps ? { total: totals.steps_total.toString(), average: average(totals.steps_total, totals.steps_users), users: Number(totals.steps_users) } : null,
-        calories: visibility.totalCalories ? { total: totals.calories_total.toString(), average: average(totals.calories_total, totals.calories_users), users: Number(totals.calories_users) } : null,
-        sleep: visibility.totalSleep ? { total: totals.sleep_total.toString(), average: average(totals.sleep_total, totals.sleep_users), users: Number(totals.sleep_users) } : null,
+        steps: visibility.totalSteps ? metricKpi('steps') : null,
+        calories: visibility.totalCalories ? metricKpi('calories') : null,
+        sleep: visibility.totalSleep ? metricKpi('sleep') : null,
       },
       trends: {
         steps: visibility.stepsTrend ? dailyByMetric.get('steps') ?? [] : [],
@@ -222,6 +262,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         averageCalories: row.average_calories.toString(),
         totalSleep: row.total_sleep.toString(),
         averageSleep: row.average_sleep.toString(),
+        stepsDays: Number(row.steps_days), caloriesDays: Number(row.calories_days), sleepDays: Number(row.sleep_days),
+        wallets: identity(row.user_id).split(', ').filter((wallet) => /^0x[0-9a-f]{40}$/i.test(wallet)),
       })) : [],
     })
   } catch (error) {

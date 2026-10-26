@@ -6,6 +6,7 @@ import { normalizeAddress } from '@/lib/system/addresses'
 import { walletBalanceColumnForTokenAddress, walletBalanceFieldForTokenAddress, walletExpiredBalanceColumnForTokenAddress } from '@/lib/walletBalances'
 import { getWorkspaceReportScope, type WorkspaceReportScope } from './workspaceScope'
 import { reportingDaySql } from './reportingDay'
+import type { ReportDateRange } from './reportPeriod'
 
 const POINT_TOKEN_SYMBOL_ORDER = ['FIT', 'GRN', 'INT', 'TGT', 'EVT', 'HLT', 'SCT', 'GVT'] as const
 
@@ -39,6 +40,10 @@ export interface Kap22Summary {
   daily: Kap22DailyPoint[]
   timezone: string
   historyStart: string
+  period?: { from: string; to: string }
+  dataThrough?: string | null
+  snapshotAt?: string | null
+  activity?: { mint: string; burn: string; distributed: string; totalTransactions: number }
 }
 
 export type Kap22TransactionType = 'Mint' | 'Burn' | 'Transfer'
@@ -186,7 +191,7 @@ async function reportContext(tokenAddress: string, workspaceSelection: number | 
   }
 }
 
-export async function getKap22Summary(tokenAddress: string, workspaceSelection: number | 'all', options: { includeExpired?: boolean } = {}): Promise<Kap22Summary | null> {
+export async function getKap22Summary(tokenAddress: string, workspaceSelection: number | 'all', options: { includeExpired?: boolean; range?: ReportDateRange } = {}): Promise<Kap22Summary | null> {
   const context = await reportContext(tokenAddress, workspaceSelection)
   if (!context) return null
   const zeroSql = addressSql(context.zeroAddresses)
@@ -316,7 +321,22 @@ export async function getKap22Summary(tokenAddress: string, workspaceSelection: 
   const grossTransferToUsers = new Prisma.Decimal(decimalString(total?.gross_transfer_to_users))
   const transferToUsers = grossTransferToUsers.minus(burn)
   const reconciliationDelta = mint.minus(distributorPool.plus(operationPool).plus(transferToUsers).plus(burn))
+  const range = options.range
+  const [flowRows, freshness, snapshot] = await Promise.all([
+    prisma.$queryRaw<Array<{ mint: Prisma.Decimal; burn: Prisma.Decimal; total_transactions: bigint }>>(Prisma.sql`
+      SELECT COALESCE(SUM(value) FILTER(WHERE LOWER("fromHash")=ANY(${zeroSql})),0) mint,
+        COALESCE(SUM(value) FILTER(WHERE LOWER("toHash")=ANY(${zeroSql})),0) burn, COUNT(DISTINCT "txId")::bigint total_transactions
+      FROM "TransactionDetail" WHERE LOWER("tokenAddress")=${context.normalizedToken} AND "timestamp">=${range?.start ?? context.historyStart} ${range ? Prisma.sql`AND "timestamp"<${range.end}` : Prisma.empty}
+    `),
+    prisma.transactionDetail.aggregate({ where: { tokenAddress: { equals: context.normalizedToken, mode: 'insensitive' } }, _max: { timestamp: true } }),
+    prisma.wallet.aggregate({ where: { OR: [{ walletId: { in: [...context.distributorAddresses, ...context.operationAddresses], mode: 'insensitive' } }, { walletId: { equals: context.normalizedToken, mode: 'insensitive' } }] }, _max: { timestamp: true } }),
+  ])
+  const selectedDaily = range ? daily.filter((point) => point.date >= range.from && point.date <= range.to) : daily
   return {
+    period: range ? { from: range.from, to: range.to } : undefined,
+    dataThrough: freshness._max.timestamp?.toISOString() ?? null,
+    snapshotAt: snapshot._max.timestamp?.toISOString() ?? null,
+    activity: { mint: decimalString(flowRows[0]?.mint), burn: decimalString(flowRows[0]?.burn), distributed: selectedDaily.reduce((sum, point) => sum.add(point.totalAmount), new Prisma.Decimal(0)).toString(), totalTransactions: Number(flowRows[0]?.total_transactions ?? 0) },
     token: context.token,
     totalTransactions: Number(transactionRows[0]?.total_transactions ?? 0),
     distributorPool: distributorPool.toString(),
@@ -327,18 +347,18 @@ export async function getKap22Summary(tokenAddress: string, workspaceSelection: 
     expired: decimalString(expiredRows[0]?.total_expired),
     reconciliationDelta: reconciliationDelta.toString(),
     reconciliationMatched: reconciliationDelta.isZero(),
-    daily,
+    daily: selectedDaily,
     timezone: context.timezone,
     historyStart: context.historyStart.toISOString(),
   }
 }
 
-export async function getKap22Transactions(tokenAddress: string, workspaceSelection: number | 'all', page: number, limit: number, search = ''): Promise<{ rows: Kap22TransactionRow[]; total: number; totalPages: number } | null> {
+export async function getKap22Transactions(tokenAddress: string, workspaceSelection: number | 'all', page: number, limit: number, search = '', range?: ReportDateRange): Promise<{ rows: Kap22TransactionRow[]; total: number; totalPages: number } | null> {
   const context = await reportContext(tokenAddress, workspaceSelection)
   if (!context) return null
   const where: Prisma.TransactionDetailWhereInput = {
     tokenAddress: { equals: context.normalizedToken, mode: 'insensitive' },
-    timestamp: { gte: context.historyStart },
+    timestamp: { gte: range?.start ?? context.historyStart, ...(range ? { lt: range.end } : {}) },
     ...(context.scope.tokenAddresses === null ? {} : { tokenAddress: { equals: context.normalizedToken, mode: 'insensitive', in: context.scope.tokenAddresses } }),
     ...(search ? {
       OR: [
@@ -402,7 +422,7 @@ export async function getKap22Transactions(tokenAddress: string, workspaceSelect
   }
 }
 
-export async function getKap22TopUsers(tokenAddress: string, workspaceSelection: number | 'all'): Promise<Kap22TopUsers | null> {
+export async function getKap22TopUsers(tokenAddress: string, workspaceSelection: number | 'all', range?: ReportDateRange): Promise<Kap22TopUsers | null> {
   const context = await reportContext(tokenAddress, workspaceSelection)
   if (!context) return null
   const poolSql = addressSql([...context.distributorAddresses, ...context.operationAddresses])
@@ -423,7 +443,8 @@ export async function getKap22TopUsers(tokenAddress: string, workspaceSelection:
         SUM(detail.value) AS amount
       FROM "TransactionDetail" detail
       WHERE LOWER(detail."tokenAddress") = ${context.normalizedToken}
-        AND detail."timestamp" >= ${context.historyStart}
+        AND detail."timestamp" >= ${range?.start ?? context.historyStart}
+        ${range ? Prisma.sql`AND detail."timestamp" < ${range.end}` : Prisma.empty}
         ${tokenScopeSql}
         AND LOWER(detail."fromHash") = ANY(${poolSql})
         AND NOT EXISTS (

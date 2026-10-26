@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { canAccessAnyChart, canAccessChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
-import { getNftRedemptionsSummary, InvalidReportTokenError } from '@/lib/reporting/nftRedemptionsAnalysis'
-import { parseReportDateRange, ReportPeriodError } from '@/lib/reporting/reportPeriod'
+import { getNftRedemptionsSummary, getNftRedemptionInsights, InvalidReportTokenError } from '@/lib/reporting/nftRedemptionsAnalysis'
+import { parseReportDateRange, getPreviousReportRange, ReportPeriodError } from '@/lib/reporting/reportPeriod'
 import { isSelectableReportWorkspace, parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -15,10 +15,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const token = request.nextUrl.searchParams.get('token') ?? ''
     const range = await parseReportDateRange(request.nextUrl.searchParams)
-    const summary = await getNftRedemptionsSummary(workspace, token, range)
+    const previousRange = await getPreviousReportRange(range)
+    const [summary, insights, previous] = await Promise.all([getNftRedemptionsSummary(workspace, token, range), getNftRedemptionInsights(workspace, token, range), previousRange ? getNftRedemptionsSummary(workspace, token, previousRange) : Promise.resolve(null)])
+    const mint = canAccessChart(admin, 'nft.nft-mint'); const burn = canAccessChart(admin, 'nft.nft-burn')
+    const payment = canAccessChart(admin, 'nft.kap20-burn'); const fee = canAccessChart(admin, 'nft.kap20-fee')
     const canViewNftMetadata = canAccessAnyChart(admin, ['nft.nft-mint', 'nft.nft-burn'])
     const canViewKap20Metadata = canAccessAnyChart(admin, ['nft.kap20-burn', 'nft.kap20-fee'])
     return NextResponse.json({ ...summary,
+      period: { from: range.from, to: range.to },
+      comparisonPeriod: previousRange ? { from: previousRange.from, to: previousRange.to } : null,
+      previous: previous ? { nftMint: mint ? previous.nftMint : null, nftBurn: burn ? previous.nftBurn : null, kap20Burn: payment ? previous.kap20Burn : null, kap20Fee: fee ? previous.kap20Fee : null } : null,
+      trend: mint || burn ? insights.trend.map((point) => ({ label: point.label, ...(mint ? { issued: point.issued } : {}), ...(burn ? { used: point.used } : {}) })) : [],
+      currentInventory: mint && burn ? insights.currentInventory : null,
+      dataThrough: mint || burn ? insights.dataThrough : null,
       nftMint: canAccessChart(admin, 'nft.nft-mint') ? summary.nftMint : 0,
       nftBurn: canAccessChart(admin, 'nft.nft-burn') ? summary.nftBurn : 0,
       nftSymbol: canViewNftMetadata ? summary.nftSymbol : 'NFT',
