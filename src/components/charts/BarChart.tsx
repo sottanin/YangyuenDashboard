@@ -1,5 +1,7 @@
 'use client'
 
+import { withExpandableChart } from '@/components/charts/ExpandableChart'
+
 import { useEffect, useId, useRef, useState } from 'react'
 import { fmt, formatDecimalAmount } from './chartUtils'
 import { useResolvedColors } from './useResolvedColors'
@@ -27,7 +29,7 @@ interface BarChartProps {
   groupWidthRatio?: number
 }
 
-export function BarChart({
+function BarChartPlot({
   data,
   height = 240,
   valueKey = 'value',
@@ -203,3 +205,5 @@ export function BarChart({
     </div>
   )
 }
+
+export const BarChart = withExpandableChart(BarChartPlot, 'Bar chart')

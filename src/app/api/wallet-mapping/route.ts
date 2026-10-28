@@ -1,6 +1,8 @@
 import { Prisma } from '@prisma/client'
 import { NextRequest, NextResponse } from 'next/server'
 import { canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
+import { CANONICAL_NORMALIZED_ADDRESSES } from '@/lib/system/addresses'
+import { getWorkspaceReportScope } from '@/lib/reporting/workspaceScope'
 import { prisma } from '@/lib/prisma'
 import { authorizeSystemMutation } from '@/lib/system/authorization'
 import { parseWalletMappingWorkbook } from '@/lib/walletMappingImport'
@@ -29,8 +31,42 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (workspaceId === null) return NextResponse.json({ error: 'Select a workspace' }, { status: 400 })
   const denied = await authorizeRead(workspaceId)
   if (denied) return denied
-  const page = Math.max(1, Math.min(10_000, Number(request.nextUrl.searchParams.get('page') ?? 1) || 1))
+  const mode = request.nextUrl.searchParams.get('mode') ?? 'mapped'
+  if (!['mapped', 'unmapped-wallet', 'unmapped-user'].includes(mode)) return NextResponse.json({ error: 'Invalid mapping status' }, { status: 400 })
+  const page = Math.max(1, Math.min(10_000, Math.floor(Number(request.nextUrl.searchParams.get('page') ?? 1)) || 1))
   const search = (request.nextUrl.searchParams.get('search') ?? '').trim().toLowerCase().slice(0, 200)
+  if (mode !== 'mapped') {
+    const scope = await getWorkspaceReportScope(workspaceId)
+    const tokens = scope.tokenAddresses ?? []
+    const tokenList = tokens.length ? Prisma.join(tokens) : Prisma.sql`NULL`
+    // Source identities are scoped before the anti-join. Never use the global Wallet table.
+    const source = mode === 'unmapped-user'
+      ? Prisma.sql`SELECT "userId" AS identity FROM "FitivityData" WHERE "workspaceId" = ${workspaceId}`
+      : Prisma.sql`
+        SELECT "fromHash" AS identity FROM "TransactionDetail" WHERE lower("tokenAddress") IN (${tokenList})
+        UNION ALL SELECT "toHash" FROM "TransactionDetail" WHERE lower("tokenAddress") IN (${tokenList})
+        UNION ALL SELECT "fromHash" FROM "RedemptionTransactionDetail" WHERE lower("tokenAddress") IN (${tokenList})
+        UNION ALL SELECT "toHash" FROM "RedemptionTransactionDetail" WHERE lower("tokenAddress") IN (${tokenList})`
+    const mappedColumn = mode === 'unmapped-user' ? Prisma.sql`m."normalizedUserId"` : Prisma.sql`m."normalizedWalletAddress"`
+    const walletExclusions = mode === 'unmapped-wallet' ? Prisma.sql`
+      AND lower(trim(identity)) ~ '^0x[0-9a-f]{40}$'
+      AND lower(trim(identity)) NOT IN (${Prisma.join([...CANONICAL_NORMALIZED_ADDRESSES])})
+      AND NOT EXISTS (SELECT 1 FROM "TokenContract" t WHERE t."normalizedAddress" = lower(trim(identity)))
+      AND NOT EXISTS (SELECT 1 FROM "AddressContract" a WHERE (a."workspaceId" = ${workspaceId} OR a."workspaceId" IS NULL) AND a.role <> 'OTHER' AND a."normalizedAddress" = lower(trim(identity)))` : Prisma.empty
+    const cte = Prisma.sql`WITH source AS (${source}), identities AS (
+      SELECT lower(trim(identity)) AS normalized, min(identity) AS original FROM source
+      WHERE trim(identity) <> '' ${walletExclusions}
+      AND NOT EXISTS (SELECT 1 FROM "WalletMapping" m WHERE m."workspaceId" = ${workspaceId} AND ${mappedColumn} = lower(trim(identity)))
+      GROUP BY lower(trim(identity))
+    ), filtered AS (SELECT * FROM identities WHERE position(${search} IN normalized) > 0)`
+    const counts = await prisma.$queryRaw<{ total: bigint }[]>(Prisma.sql`${cte} SELECT count(*) AS total FROM filtered`)
+    const total = Number(counts[0]?.total ?? 0)
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+    const resolvedPage = Math.min(page, totalPages)
+    const identities = await prisma.$queryRaw<{ normalized: string; original: string }[]>(Prisma.sql`${cte} SELECT normalized, original FROM filtered ORDER BY normalized OFFSET ${(resolvedPage - 1) * PAGE_SIZE} LIMIT ${PAGE_SIZE}`)
+    const rows = identities.map((row) => ({ id: `${mode}:${row.normalized}`, userId: mode === 'unmapped-user' ? row.original : '', walletAddress: mode === 'unmapped-wallet' ? row.original : '' }))
+    return NextResponse.json({ rows, pagination: { page: resolvedPage, pageSize: PAGE_SIZE, total, totalPages } })
+  }
   const where: Prisma.WalletMappingWhereInput = {
     workspaceId,
     ...(search ? { OR: [{ normalizedUserId: { contains: search } }, { normalizedWalletAddress: { contains: search } }] } : {}),

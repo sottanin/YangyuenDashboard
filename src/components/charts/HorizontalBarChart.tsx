@@ -1,5 +1,7 @@
 'use client'
 
+import { withExpandableChart, useExpandedPlotHeight } from '@/components/charts/ExpandableChart'
+
 import { useEffect, useId, useRef, useState } from 'react'
 import { useResolvedColors } from './useResolvedColors'
 import { Icon } from '@/components/ui/Icon'
@@ -48,7 +50,7 @@ function RankMarker({ index, y, variant }: { index: number; y: number; variant: 
   </g>
 }
 
-export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', ariaLabel, rankMarker = 'trophy', drilldownPeriod = 'all', drilldownFrom, drilldownTo }: HorizontalBarChartProps): React.JSX.Element {
+function HorizontalBarChartPlot({ data, symbol, color = 'var(--accent)', ariaLabel, rankMarker = 'trophy', drilldownPeriod = 'all', drilldownFrom, drilldownTo }: HorizontalBarChartProps): React.JSX.Element {
   const { selected } = useWorkspace()
   const walletHref = (address: string): string => { const params = new URLSearchParams({ wallet: address, workspace: String(selected.id), period: drilldownPeriod }); if (drilldownPeriod === 'custom' && drilldownFrom && drilldownTo) { params.set('from', drilldownFrom); params.set('to', drilldownTo) }; return `/dashboard/wallet-activity?${params}` }
   const rootRef = useRef<HTMLDivElement>(null)
@@ -73,7 +75,8 @@ export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', aria
     setTooltipWidth(element.getBoundingClientRect().width)
   }, [hovered])
 
-  const height = Math.max(250, data.length * 31 + 26)
+  const expandedHeight = useExpandedPlotHeight()
+  const height = Math.max(expandedHeight ?? 0, 250, data.length * 31 + 26)
   const left = width < 440 ? 136 : 160
   const visibleValueLabels = data.map((point) => `${formatExactAmount(point.amount)} ${symbol}`)
   const longestValueLabel = visibleValueLabels.reduce((longest, label) => Math.max(longest, label.length), 0)
@@ -124,3 +127,5 @@ export function HorizontalBarChart({ data, symbol, color = 'var(--accent)', aria
     <div className="sr-only"><ol>{data.map((point, index) => <li key={point.walletAddress}>Rank {index + 1}, {point.walletAddress}: {formatExactAmount(point.amount)} {symbol}</li>)}</ol></div>
   </div>
 }
+
+export const HorizontalBarChart = withExpandableChart(HorizontalBarChartPlot, 'HorizontalBar chart')

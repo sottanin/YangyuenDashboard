@@ -1,5 +1,7 @@
 'use client'
 
+import { withExpandableChart } from '@/components/charts/ExpandableChart'
+
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { AverageReferenceTag } from './AverageReferenceTag'
 import { fmt, smoothPath } from './chartUtils'
@@ -24,7 +26,7 @@ interface Props {
   referenceUnit?: string
 }
 
-export function DualLineChart({
+function DualLineChartPlot({
   data,
   primaryLabel,
   secondaryLabel,
@@ -164,3 +166,5 @@ export function DualLineChart({
     </div>
   )
 }
+
+export const DualLineChart = withExpandableChart(DualLineChartPlot, 'DualLine chart')

@@ -1,5 +1,7 @@
 'use client'
 
+import { withExpandableChart, useExpandedPlotHeight } from '@/components/charts/ExpandableChart'
+
 import { NftRank } from '@/components/ui/NftRank'
 import { TokenAvatar } from '@/components/ui/TokenAvatar'
 
@@ -14,11 +16,12 @@ interface Props {
   variant?: 'redemption' | 'burn'
 }
 
-export function NftRedemptionBarChart({ data, variant = 'redemption' }: Props): React.JSX.Element {
+function NftRedemptionBarChartPlot({ data, variant = 'redemption' }: Props): React.JSX.Element {
+  const expandedHeight = useExpandedPlotHeight()
   const maximum = Math.max(1, ...data.map((point) => point.total))
   const barColor = variant === 'burn' ? '#f97316' : 'rgb(var(--accent))'
   const trackColor = variant === 'burn' ? 'rgb(249 115 22 / 0.12)' : 'rgb(var(--accent) / 0.12)'
-  return <div className="space-y-3" role="list" aria-label={variant === 'burn' ? 'Top 10 NFT burns' : 'Top 10 NFT redemptions'}>
+  return <div className="space-y-3" style={expandedHeight ? { minHeight: expandedHeight, display: 'grid', alignContent: 'space-evenly' } : undefined} role="list" aria-label={variant === 'burn' ? 'Top 10 NFT burns' : 'Top 10 NFT redemptions'}>
     {data.map((point, index) => <div key={`${point.name}-${index}`} className="grid grid-cols-[28px_minmax(110px,180px)_minmax(120px,1fr)_52px] items-center gap-3" role="listitem">
       <NftRank index={index} />
       <div className="flex min-w-0 items-center gap-2">
@@ -40,3 +43,5 @@ export function NftRedemptionBarChart({ data, variant = 'redemption' }: Props): 
     </div>)}
   </div>
 }
+
+export const NftRedemptionBarChart = withExpandableChart(NftRedemptionBarChartPlot, 'NftRedemptionBar chart')

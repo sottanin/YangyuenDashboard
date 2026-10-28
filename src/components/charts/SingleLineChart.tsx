@@ -1,5 +1,7 @@
 'use client'
 
+import { withExpandableChart } from '@/components/charts/ExpandableChart'
+
 import { useEffect, useId, useRef, useState, type PointerEvent } from 'react'
 import { AverageReferenceTag } from './AverageReferenceTag'
 import { datePositions } from '@/lib/reporting/chartTimeline'
@@ -23,7 +25,7 @@ interface SingleLineChartProps {
 function formatValue(value: number, digits: number): string { return value.toLocaleString('en-US', { maximumFractionDigits: digits }) }
 function axisDate(label: string): string { return /^\d{4}-\d{2}-\d{2}$/.test(label) ? label.slice(5) : label }
 
-export function SingleLineChart({ data, label, tooltipUnit, averageUnit = tooltipUnit, color = 'var(--success)', valueKind = 'amount', fractionDigits, showAverage = true, averageLabelPrefix = 'เฉลี่ย ', referenceValue, referenceLabel = 'ค่าเฉลี่ยจากวันที่มีข้อมูล', height = 300 }: SingleLineChartProps): React.JSX.Element {
+function SingleLineChartPlot({ data, label, tooltipUnit, averageUnit = tooltipUnit, color = 'var(--success)', valueKind = 'amount', fractionDigits, showAverage = true, averageLabelPrefix = 'เฉลี่ย ', referenceValue, referenceLabel = 'ค่าเฉลี่ยจากวันที่มีข้อมูล', height = 300 }: SingleLineChartProps): React.JSX.Element {
   const gradientId = `single-line-area-${useId().replaceAll(':', '')}`
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(640)
@@ -83,3 +85,5 @@ export function SingleLineChart({ data, label, tooltipUnit, averageUnit = toolti
     <div className="sr-only"><ul>{data.map((point) => <li key={point.label}>{point.label}: {point.value === null ? 'ยังไม่มีรายงาน' : `${formatValue(point.value, digits)} ${tooltipUnit}`}{point.detail ? `; ${point.detail}` : ''}</li>)}</ul></div>
   </div>
 }
+
+export const SingleLineChart = withExpandableChart(SingleLineChartPlot, 'SingleLine chart')

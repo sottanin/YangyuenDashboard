@@ -1,5 +1,7 @@
 'use client'
 
+import { withExpandableChart } from '@/components/charts/ExpandableChart'
+
 import { useEffect, useId, useRef, useState } from 'react'
 import { smoothPath, fmt } from './chartUtils'
 import { useResolvedColors } from './useResolvedColors'
@@ -21,7 +23,7 @@ interface AreaChartProps {
   gradientFill?: boolean
 }
 
-export function AreaChart({
+function AreaChartPlot({
   data,
   height = 280,
   keys = [{ key: 'value', color: 'var(--accent)' }],
@@ -163,3 +165,5 @@ export function AreaChart({
     </div>
   )
 }
+
+export const AreaChart = withExpandableChart(AreaChartPlot, 'Area chart')

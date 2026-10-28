@@ -8,6 +8,8 @@ import { useWorkspace } from '@/lib/WorkspaceContext'
 
 interface TopBarProps {
   onToggleSidebar: () => void
+  sidebarExpanded: boolean
+  sidebarControls: string
   currentPageLabel: string
   admin: {
     name: string
@@ -18,7 +20,7 @@ interface TopBarProps {
   }
 }
 
-export function TopBar({ onToggleSidebar, currentPageLabel, admin }: TopBarProps) {
+export function TopBar({ onToggleSidebar, sidebarExpanded, sidebarControls, currentPageLabel, admin }: TopBarProps) {
   const { mode, setMode } = useTheme()
   const router = useRouter()
   const { selected, setSelected, workspaces } = useWorkspace()
@@ -56,10 +58,10 @@ export function TopBar({ onToggleSidebar, currentPageLabel, admin }: TopBarProps
   const wsOptions = workspaces
 
   return (
-    <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-6 px-6 pt-4 pb-3 glass-strong border-b border-default">
+    <div data-dashboard-topbar className="sticky top-0 z-20 -mx-6 -mt-6 mb-6 px-6 pt-4 pb-3 glass-strong border-b border-default">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
-          <button className="btn-icon btn btn-ghost" onClick={onToggleSidebar} title="Toggle sidebar">
+          <button type="button" data-sidebar-toggle aria-label="Toggle sidebar" aria-expanded={sidebarExpanded} aria-controls={sidebarControls} className="btn btn-ghost min-h-11 min-w-11 shrink-0 focus-visible:ring-2 focus-visible:ring-accent" onClick={onToggleSidebar} title="Toggle sidebar">
             <Icon name="panel" size={16} />
           </button>
           <div className="hidden xl:flex items-center gap-2 text-xs text-muted">

@@ -12,6 +12,8 @@ type SidebarState = 'open' | 'narrow' | 'closed'
 
 interface SidebarProps {
   state: SidebarState
+  mobile?: boolean
+  onClose?: () => void
   admin: {
     name: string
     email: string | null
@@ -21,7 +23,7 @@ interface SidebarProps {
   }
 }
 
-export function Sidebar({ state, admin }: SidebarProps) {
+export function Sidebar({ state, admin, mobile = false, onClose }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [profileOpen, setProfileOpen] = useState(false)
@@ -52,9 +54,13 @@ export function Sidebar({ state, admin }: SidebarProps) {
 
   return (
     <aside
-      className={`fixed left-0 top-0 bottom-0 z-30 hidden transition-all duration-200 ease-out md:block ${
-        isNarrow ? 'w-[68px] sidebar-narrow' : 'w-[240px]'
-      }`}
+      id={mobile ? 'dashboard-mobile-sidebar' : 'dashboard-sidebar'}
+      role={mobile ? 'dialog' : undefined}
+      aria-modal={mobile ? true : undefined}
+      aria-label={mobile ? 'Main menu' : undefined}
+      className={mobile
+        ? 'fixed inset-y-0 left-0 z-50 w-[min(280px,calc(100vw-48px))] overscroll-contain bg-[rgb(var(--surface))] md:hidden'
+        : `fixed left-0 top-0 bottom-0 z-30 hidden transition-all duration-200 ease-out md:block ${isNarrow ? 'w-[68px] sidebar-narrow' : 'w-[240px]'}`}
     >
       <div className="h-full glass-strong border-r border-default flex flex-col p-3">
         {/* Logo */}
@@ -68,10 +74,13 @@ export function Sidebar({ state, admin }: SidebarProps) {
               <div className="text-[10px] text-muted mt-0.5">Data Analysis</div>
             </div>
           )}
+          {mobile && <button type="button" aria-label="Close menu" className="btn btn-ghost ml-auto min-h-11 min-w-11 shrink-0 focus-visible:ring-2 focus-visible:ring-accent" onClick={onClose}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
+          </button>}
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto thin-scroll">
+        <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain thin-scroll">
           {sections.map((section) => (
             <div key={section.section} className="mb-3">
               <div className="nav-section-label text-[10px] uppercase tracking-wider text-faint px-2 mb-1.5 font-medium">
@@ -81,6 +90,7 @@ export function Sidebar({ state, admin }: SidebarProps) {
                 <Link
                   key={item.key}
                   href={item.href}
+                  onClick={onClose}
                   className={`nav-item ${isActive(item.href) ? 'active' : ''}`}
                   title={isNarrow ? item.label : undefined}
                 >

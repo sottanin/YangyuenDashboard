@@ -12,6 +12,7 @@ yarn-error.log*
 .codex
 .information
 .playwright-cli
+.playwright-mcp
 output
 coverage
 *.log

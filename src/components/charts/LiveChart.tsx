@@ -1,5 +1,7 @@
 'use client'
 
+import { withExpandableChart } from '@/components/charts/ExpandableChart'
+
 import { useEffect, useRef, useState } from 'react'
 import { smoothPath } from './chartUtils'
 import { useResolvedColors } from './useResolvedColors'
@@ -9,7 +11,7 @@ interface LiveChartProps {
   color?: string
 }
 
-export function LiveChart({ height = 180, color = 'var(--accent)' }: LiveChartProps) {
+function LiveChartPlot({ height = 180, color = 'var(--accent)' }: LiveChartProps) {
   const [resolved] = useResolvedColors([color])
   const [points, setPoints] = useState<number[]>(() =>
     Array.from({ length: 40 }, (_, i) => 50 + Math.sin(i * 0.4) * 20 + Math.random() * 15)
@@ -73,3 +75,5 @@ export function LiveChart({ height = 180, color = 'var(--accent)' }: LiveChartPr
     </div>
   )
 }
+
+export const LiveChart = withExpandableChart(LiveChartPlot, 'Live chart')

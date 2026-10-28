@@ -1,5 +1,7 @@
 'use client'
 
+import { withExpandableChart, useExpandedPlotHeight } from '@/components/charts/ExpandableChart'
+
 import { useEffect, useId, useRef, useState } from 'react'
 import { useResolvedColors } from './useResolvedColors'
 import { useWorkspace } from '@/lib/WorkspaceContext'
@@ -27,7 +29,7 @@ function formatValue(value: string, maximumFractionDigits: number): string {
   return Number.isFinite(number) ? number.toLocaleString('en-US', { maximumFractionDigits }) : value
 }
 
-export function RankedMetricBarChart({ data, unit, color, ariaLabel, maximumFractionDigits = 0, drilldownPeriod = 'all', drilldownFrom, drilldownTo }: Props): React.JSX.Element {
+function RankedMetricBarChartPlot({ data, unit, color, ariaLabel, maximumFractionDigits = 0, drilldownPeriod = 'all', drilldownFrom, drilldownTo }: Props): React.JSX.Element {
   const { selected } = useWorkspace()
   const href = (address: string): string => { const params = new URLSearchParams({ workspace: String(selected.id), wallet: address, period: drilldownPeriod }); if (drilldownPeriod === 'custom' && drilldownFrom && drilldownTo) { params.set('from', drilldownFrom); params.set('to', drilldownTo) }; return `/dashboard/wallet-activity?${params}` }
   const rootRef = useRef<HTMLDivElement>(null)
@@ -42,7 +44,8 @@ export function RankedMetricBarChart({ data, unit, color, ariaLabel, maximumFrac
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
-  const height = Math.max(280, data.length * 43 + 18)
+  const expandedHeight = useExpandedPlotHeight()
+  const height = Math.max(expandedHeight ?? 0, 280, data.length * 43 + 18)
   const left = width < 440 ? 118 : 168
   const right = width < 440 ? 96 : 138
   const innerWidth = Math.max(1, width - left - right)
@@ -69,3 +72,5 @@ export function RankedMetricBarChart({ data, unit, color, ariaLabel, maximumFrac
     <div className="sr-only"><ol>{data.map((point, index) => <li key={`${index}:${point.label}`}>Rank {index + 1}, {point.label}: {formatValue(point.value, maximumFractionDigits)} {unit}</li>)}</ol></div>
   </div>
 }
+
+export const RankedMetricBarChart = withExpandableChart(RankedMetricBarChartPlot, 'RankedMetricBar chart')
