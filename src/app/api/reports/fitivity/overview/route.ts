@@ -19,7 +19,7 @@ interface TotalRow {
   sleep_days: bigint
 }
 interface DailyRow { date: string; metric: string; total: Prisma.Decimal; user_count: bigint }
-interface TopRow { metric: string; user_id: string; total: Prisma.Decimal; daily_average: Prisma.Decimal; reported_days: bigint }
+interface TopRow { metric: string; user_id: string; total: Prisma.Decimal; daily_average: Prisma.Decimal; reported_days: bigint; rank_mode: 'daily' | 'cumulative' }
 interface DistributionRow { metric: string; bucket: number; user_count: bigint }
 interface UserSummaryRow {
   user_id: string
@@ -123,8 +123,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           WHERE "workspaceId"=${workspaceId} AND "isCal"=true AND date BETWEEN ${range.from}::date AND ${range.to}::date
             AND "metricType" IN ('steps','active_energy_burned',${Prisma.join(SLEEP_TYPES)})
         ), totals AS (SELECT metric,"userId" user_id,SUM(value) total,COUNT(DISTINCT date)::bigint reported_days,SUM(value)/NULLIF(COUNT(DISTINCT date),0) daily_average FROM base GROUP BY metric,"userId"),
-        ranked AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY metric ORDER BY daily_average DESC,reported_days DESC,user_id) rank FROM totals)
-        SELECT metric,user_id,total,daily_average,reported_days FROM ranked WHERE rank<=10 ORDER BY metric,rank
+        ranked AS (
+          SELECT *,
+            ROW_NUMBER() OVER(PARTITION BY metric ORDER BY daily_average DESC,reported_days DESC,user_id) daily_rank,
+            ROW_NUMBER() OVER(PARTITION BY metric ORDER BY total DESC,reported_days DESC,user_id) cumulative_rank
+          FROM totals
+        )
+        SELECT metric,user_id,total,daily_average,reported_days,'daily'::text rank_mode,daily_rank rank FROM ranked WHERE daily_rank<=10
+        UNION ALL
+        SELECT metric,user_id,total,daily_average,reported_days,'cumulative'::text rank_mode,cumulative_rank rank FROM ranked WHERE cumulative_rank<=10
+        ORDER BY metric,rank_mode,rank
       `) : Promise.resolve([] as TopRow[]),
       needsDistribution ? prisma.$queryRaw<DistributionRow[]>(Prisma.sql`
         WITH base AS (
@@ -206,7 +214,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       points.push({ date: row.date, average: average(row.total, row.user_count), accumulated: accumulated.toString(), users: Number(row.user_count) })
       dailyByMetric.set(row.metric, points)
     }
-    const topByMetric = (metric: string): Array<{ label: string; value: string; walletAddress?: string; detail: string }> => topRows.filter((row) => row.metric === metric).map((row) => ({ label: identity(row.user_id), walletAddress: identity(row.user_id).split(', ').find((wallet) => /^0x[0-9a-f]{40}$/i.test(wallet)), value: row.daily_average.toString(), detail: `${Number(row.reported_days)} reported days` }))
+    const topByMetric = (metric: string, mode: 'daily' | 'cumulative' = 'daily'): Array<{ label: string; value: string; walletAddress?: string; detail: string }> => topRows.filter((row) => row.metric === metric && row.rank_mode === mode).map((row) => ({ label: identity(row.user_id), walletAddress: identity(row.user_id).split(', ').find((wallet) => /^0x[0-9a-f]{40}$/i.test(wallet)), value: (mode === 'daily' ? row.daily_average : row.total).toString(), detail: `${Number(row.reported_days)} reported days` }))
     const distributionLabels: Record<string, string[]> = {
       steps: ['≤2,000 steps/day', '>2,000–4,000 steps/day', '>4,000–6,000 steps/day', '>6,000–8,000 steps/day', '>8,000–10,000 steps/day', '>10,000–20,000 steps/day', '>20,000 steps/day'],
       calories: ['≤100 kcal/day', '>100–200 kcal/day', '>200–300 kcal/day', '>300–400 kcal/day', '>400–500 kcal/day', '>500 kcal/day'],
@@ -247,6 +255,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         steps: visibility.topSteps ? topByMetric('steps') : [],
         calories: visibility.topCalories ? topByMetric('calories') : [],
         sleep: visibility.topSleep ? topByMetric('sleep') : [],
+      },
+      topUsersCumulative: {
+        steps: visibility.topSteps ? topByMetric('steps', 'cumulative') : [],
+        calories: visibility.topCalories ? topByMetric('calories', 'cumulative') : [],
+        sleep: visibility.topSleep ? topByMetric('sleep', 'cumulative') : [],
       },
       distributions: {
         steps: visibility.stepsDistribution ? distributionByMetric('steps') : [],

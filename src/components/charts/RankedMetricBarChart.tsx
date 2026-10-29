@@ -21,7 +21,13 @@ interface Props {
 }
 
 function RankMarker({ index, y }: { index: number; y: number }): React.JSX.Element {
-  return <text x="0" y={y} fontSize="10.5" fill="rgb(var(--text-faint))">#{index + 1}</text>
+  if (index > 2) return <text x="0" y={y} fontSize="10.5" fill="rgb(var(--text-faint))">#{index + 1}</text>
+  const colors = ['text-yellow-500 stroke-yellow-700', 'text-slate-300 stroke-slate-500', 'text-amber-700 stroke-amber-900']
+  const medals = ['gold', 'silver', 'bronze']
+  return <svg x="0" y={y - 14} width="18" height="18" viewBox="0 0 24 24" className={colors[index]} data-rank-trophy={medals[index]} role="img" aria-label={`Rank ${index + 1} ${medals[index]} trophy`}>
+    <path d="M7 3h10v6a5 5 0 0 1-10 0V3Z" fill="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    <path d="M7 5H4v3a4 4 0 0 0 4 4m9-7h3v3a4 4 0 0 1-4 4M12 14v5m-4 2h8m-6-2h4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
 }
 
 function formatValue(value: string, maximumFractionDigits: number): string {
@@ -60,7 +66,7 @@ function RankedMetricBarChartPlot({ data, unit, color, ariaLabel, maximumFractio
         const barHeight = rowHeight * 0.64
         const barWidth = values[index] / maximum * innerWidth
         return <g key={`${index}:${point.label}`} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} opacity={hovered !== null && hovered !== index ? 0.52 : 1}>
-          <title>{point.label}{point.detail ? ` · ${point.detail?.replace(/ reported days$/, ' วันที่มีรายงาน')}` : ''}</title>
+          <title>{`${ariaLabel} · Rank ${index + 1} · ${point.label}: ${formatValue(point.value, maximumFractionDigits)} ${unit}${point.detail ? ` · ${point.detail.replace(/ reported days$/, ' วันที่มีรายงาน')}` : ''}`}</title>
           <RankMarker index={index} y={y + barHeight / 2 + 4} />
           <a href={point.walletAddress ? href(point.walletAddress) : undefined} aria-label={point.walletAddress ? `ดูรายการในกระเป๋า for ${point.walletAddress}` : point.label}><text x="25" y={y + barHeight / 2 + 4} fontSize="10.5" fill="rgb(var(--text-muted))">{point.walletAddress ? `${point.walletAddress.slice(0, 8)}…${point.walletAddress.slice(-6)}` : point.label}</text></a>{point.detail ? <text x="25" y={y + barHeight + 12} fontSize="9" fill="rgb(var(--text-faint))">{point.detail?.replace(/ reported days$/, ' วันที่มีรายงาน')}</text> : null}
           <rect x={left} y={y} width={innerWidth} height={barHeight} rx="5" fill="rgb(var(--grid))" opacity="0.25" />
@@ -69,7 +75,7 @@ function RankedMetricBarChartPlot({ data, unit, color, ariaLabel, maximumFractio
         </g>
       })}
     </svg>
-    <div className="sr-only"><ol>{data.map((point, index) => <li key={`${index}:${point.label}`}>Rank {index + 1}, {point.label}: {formatValue(point.value, maximumFractionDigits)} {unit}</li>)}</ol></div>
+    <div className="sr-only"><ol>{data.map((point, index) => <li key={`${index}:${point.label}`}>Rank {index + 1}, {point.label}: {formatValue(point.value, maximumFractionDigits)} {unit}{point.detail ? `, ${point.detail.replace(/ reported days$/, ' วันที่มีรายงาน')}` : ''}</li>)}</ol></div>
   </div>
 }
 

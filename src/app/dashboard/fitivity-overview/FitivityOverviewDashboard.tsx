@@ -28,6 +28,7 @@ interface Report {
   kpis: { steps: KpiMetric | null; calories: KpiMetric | null; sleep: KpiMetric | null }
   trends: { steps: TrendPoint[]; calories: TrendPoint[]; sleep: TrendPoint[] }
   topUsers: { steps: RankedMetricPoint[]; calories: RankedMetricPoint[]; sleep: RankedMetricPoint[] }
+  topUsersCumulative: { steps: RankedMetricPoint[]; calories: RankedMetricPoint[]; sleep: RankedMetricPoint[] }
   distributions: { steps: MetricDistributionPoint[]; calories: MetricDistributionPoint[]; sleep: MetricDistributionPoint[] }
   userSummary: UserSummaryRow[]
 }
@@ -126,9 +127,9 @@ export function FitivityOverviewDashboard(): React.JSX.Element {
         {visible.sleepDistribution ? <DistributionCard title="Users by Average Daily Sleep Hour" data={report.distributions.sleep} color="var(--accent)" /> : null}
       </section>
       <section className="grid gap-4 xl:grid-cols-3" aria-label="Top Fitivity users">
-        {visible.topSteps ? <RankCard title="Highest recorded daily steps" data={report.topUsers.steps} unit="steps" color="var(--success)" digits={0} period={period} from={customFrom} to={customTo} /> : null}
-        {visible.topCalories ? <RankCard title="Highest recorded daily active calories" data={report.topUsers.calories} unit="kcal" color="var(--warn)" digits={2} period={period} from={customFrom} to={customTo} /> : null}
-        {visible.topSleep ? <RankCard title="Highest recorded daily sleep duration" data={report.topUsers.sleep} unit="hours" color="var(--accent)" digits={2} period={period} from={customFrom} to={customTo} /> : null}
+        {visible.topSteps ? <RankCard title="Highest recorded steps" data={report.topUsers.steps} cumulativeData={report.topUsersCumulative.steps} unit="steps" color="var(--success)" digits={0} period={period} from={customFrom} to={customTo} /> : null}
+        {visible.topCalories ? <RankCard title="Highest recorded active calories" data={report.topUsers.calories} cumulativeData={report.topUsersCumulative.calories} unit="kcal" color="var(--warn)" digits={2} period={period} from={customFrom} to={customTo} /> : null}
+        {visible.topSleep ? <RankCard title="Highest recorded sleep duration" data={report.topUsers.sleep} cumulativeData={report.topUsersCumulative.sleep} unit="hours" color="var(--accent)" digits={2} period={period} from={customFrom} to={customTo} /> : null}
       </section>
       {visible.userSummary ? <UserSummaryTable key={`${selected.id}:${period}:${customFrom}:${customTo}`} rows={report.userSummary} workspace={selected.id} period={period} from={customFrom} to={customTo} /> : null}
     </> : null}
@@ -154,7 +155,7 @@ function TrendCard({ metric, data, from, to }: { metric: keyof typeof metricConf
   })
   const personDays = data.reduce((total, point) => total + point.users, 0)
   const mean = personDays ? data.reduce((total, point) => total + Number(point.average) * point.users, 0) / personDays : undefined
-  const labels = { daily: 'ค่าเฉลี่ยรายวัน', cumulative: 'ยอดสะสมจากข้อมูลที่มี' }
+  const labels = { daily: 'ค่าเฉลี่ยรายวัน', cumulative: 'ยอดสะสมทั้งหมด' }
   const cumulativeTitles = { steps: 'Recorded steps · cumulative', calories: 'Recorded active calories · cumulative', sleep: 'Recorded sleep hours · cumulative' }
   return <Card className="min-w-0" title={mode === 'cumulative' ? cumulativeTitles[metric] : config.title} subtitle="ใช้เฉพาะวันที่มีรายงาน · ช่องว่างหมายถึงไม่มีข้อมูล ไม่ใช่ศูนย์">
     <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label={`${config.title} display mode`}>{(['daily', 'cumulative'] as const).map((value) => <button key={value} type="button" className={`btn min-h-11 text-xs ${mode === value ? 'btn-primary' : 'btn-ghost'}`} aria-pressed={mode === value} onClick={() => setMode(value)}>{labels[value]}</button>)}</div>
@@ -167,8 +168,16 @@ function DistributionCard({ title, data, color }: { title: string; data: MetricD
   return <Card title={title} subtitle="แบ่งกลุ่มผู้ใช้งานตามค่าเฉลี่ยต่อวันจากวันที่มีข้อมูลในช่วงเวลาที่เลือก">{hasUsers ? <MetricDistributionChart data={data} color={color} ariaLabel={title} /> : <Empty label="ไม่พบข้อมูลผู้ใช้งานในช่วงเวลานี้" />}</Card>
 }
 
-function RankCard({ title, data, unit, color, digits, period, from, to }: { title: string; data: RankedMetricPoint[]; unit: string; color: string; digits: number; period: ReportPeriod; from: string; to: string }): React.JSX.Element {
-  return <Card title={title} subtitle="เรียงตามค่าเฉลี่ยต่อวันที่มีรายงาน พร้อมจำนวนวัน · ไม่ใช่การประเมินสุขภาพ">{data.length ? <RankedMetricBarChart data={data} unit={unit} color={color} ariaLabel={title} maximumFractionDigits={digits} drilldownPeriod={period} drilldownFrom={from} drilldownTo={to} /> : <Empty label="ไม่พบข้อมูลผู้ใช้งานในช่วงเวลานี้" />}</Card>
+function RankCard({ title, data, cumulativeData, unit, color, digits, period, from, to }: { title: string; data: RankedMetricPoint[]; cumulativeData: RankedMetricPoint[]; unit: string; color: string; digits: number; period: ReportPeriod; from: string; to: string }): React.JSX.Element {
+  const [mode, setMode] = useState<'daily' | 'cumulative'>('daily')
+  const labels = { daily: 'ค่าเฉลี่ยรายวัน', cumulative: 'ยอดสะสมทั้งหมด' }
+  const points = mode === 'daily' ? data : cumulativeData
+  const selectedUnit = mode === 'daily' ? `${unit}/day` : unit
+  const subtitle = mode === 'daily' ? 'เรียงตามค่าเฉลี่ยต่อวันที่มีรายงานในช่วงเวลาที่เลือก · ไม่ใช่การประเมินสุขภาพ' : 'เรียงตามยอดสะสมจากวันที่มีรายงานในช่วงเวลาที่เลือก · ไม่ใช่การประเมินสุขภาพ'
+  return <Card title={title} subtitle={subtitle}>
+    <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label={`${title} display mode`}>{(['daily', 'cumulative'] as const).map((value) => <button key={value} type="button" className={`btn min-h-11 text-xs transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-accent ${mode === value ? 'btn-primary' : 'btn-ghost'}`} aria-pressed={mode === value} onClick={() => setMode(value)}>{labels[value]}</button>)}</div>
+    {points.length ? <RankedMetricBarChart data={points} unit={selectedUnit} color={color} ariaLabel={`${title} · ${labels[mode]}`} maximumFractionDigits={digits} drilldownPeriod={period} drilldownFrom={from} drilldownTo={to} /> : <Empty label="ไม่พบข้อมูลผู้ใช้งานในช่วงเวลานี้" />}
+  </Card>
 }
 
 type SummarySortKey = 'walletAddress' | 'totalSteps' | 'averageSteps' | 'totalCalories' | 'averageCalories' | 'totalSleep' | 'averageSleep'
