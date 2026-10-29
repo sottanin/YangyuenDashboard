@@ -9,7 +9,7 @@ export const CHART_CATALOG: readonly ChartCatalogItem[] = [
   { key: 'overview.nft-mint', label: 'NFT Mint', menuKey: 'overview' },
   { key: 'overview.nft-burn', label: 'NFT Burn', menuKey: 'overview' },
   { key: 'overview.point-token-distributed', label: 'Point Token Distributed', menuKey: 'overview' },
-  { key: 'overview.monthly-transactions', label: 'Monthly Transactions by Token Standard', menuKey: 'overview' },
+  { key: 'overview.monthly-transactions', label: 'Total Transactions timeline', menuKey: 'overview' },
   { key: 'overview.transaction-history', label: 'Transaction History', menuKey: 'overview' },
   { key: 'kap20.mint', label: 'Mint', menuKey: 'kap20-analysis' },
   { key: 'kap20.backup-wallet', label: 'Backup Wallet', menuKey: 'kap20-analysis' },

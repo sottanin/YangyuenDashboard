@@ -3,13 +3,13 @@
 import { ComparisonTag } from '@/components/ui/ComparisonTag'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BarChart } from '@/components/charts/BarChart'
+import { TransactionTimelineChart, type TransactionTimelineGranularity, type TransactionTimelinePoint } from '@/components/charts/TransactionTimelineChart'
 import { Card } from '@/components/ui/Card'
 import { ErrorCard } from '@/components/ui/ErrorCard'
 import { Icon } from '@/components/ui/Icon'
 import { KpiTile } from '@/components/ui/KpiTile'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { SkeletonKpi, SkeletonTable } from '@/components/ui/SkeletonCard'
+import { SkeletonCard, SkeletonKpi, SkeletonTable } from '@/components/ui/SkeletonCard'
 import { TokenAvatar } from '@/components/ui/TokenAvatar'
 import { AddressLink } from '@/components/ui/AddressLink'
 import { useWorkspace } from '@/lib/WorkspaceContext'
@@ -20,7 +20,7 @@ import type { ReportPeriod } from '@/lib/reporting/reportPeriod'
 
 interface Metric { value: string; change: number | null; changeLabel?: string; imageUrl?: string | null; symbol?: string }
 interface Row { key: string; txId: string; timestamp: string; fromHash: string; toHash: string; fromName: string | null; toName: string | null; tokenName: string; tokenSymbol: string; standard: string; type: string; value: string; tokenId: string | null; status: string | null; imageUrl: string | null }
-interface Report { timezone: string; period: { from: string; to: string }; dataThrough: string | null; comparison: {from: string; to: string} | null; kpis: { totalTransactions: Metric; dailyGasFee: Metric; totalGasFee: Metric; kap20Distributed: Metric; kap20Redeemed: Metric; redemptionFee: Metric; kap22: Array<Metric & { symbol: string }>; nftMint: Metric; nftBurn: Metric }; monthly: Array<{ label: string; kap20: number; kap22: number; kap721: number }>; transactions: { rows: Row[]; total: number; page: number; totalPages: number } }
+interface Report { timezone: string; period: { from: string; to: string }; dataThrough: string | null; comparison: {from: string; to: string} | null; kpis: { totalTransactions: Metric; dailyGasFee: Metric; totalGasFee: Metric; kap20Distributed: Metric; kap20Redeemed: Metric; redemptionFee: Metric; kap22: Array<Metric & { symbol: string }>; nftMint: Metric; nftBurn: Metric }; timeline: { monthly: TransactionTimelinePoint[]; daily: TransactionTimelinePoint[] }; transactions: { rows: Row[]; total: number; page: number; totalPages: number } }
 
 const compact = (value: string): string => value.length > 16 ? `${value.slice(0, 7)}…${value.slice(-5)}` : value
 function formatAmount(value: string): string { const number = Number(value); return Number.isFinite(number) ? number.toLocaleString('en-US', { maximumFractionDigits: 4 }) : value }
@@ -44,6 +44,7 @@ export function OverviewDashboard(): React.JSX.Element {
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [reload, setReload] = useState(0)
   const [page, setPage] = useState(1)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
@@ -53,6 +54,7 @@ export function OverviewDashboard(): React.JSX.Element {
   const [tokensError, setTokensError] = useState('')
   const [tokenWorkspace, setTokenWorkspace] = useState('')
   const [period, setPeriod] = useState<ReportPeriod>('all')
+  const [granularity, setGranularity] = useState<TransactionTimelineGranularity>('monthly')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [historyStart, setHistoryStart] = useState('')
@@ -89,14 +91,14 @@ export function OverviewDashboard(): React.JSX.Element {
     const query = new URLSearchParams({ workspace: String(selected.id), token: selectedToken, period, page: String(page) }); if (period === 'custom') { query.set('from', customFrom); query.set('to', customTo) }; if (search) query.set('search', search)
     fetch(`/api/reports/overview?${query}`, { signal: controller.signal }).then(async (response) => { const body: unknown = await response.json(); if (!response.ok) throw new Error(body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Unable to load overview'); return body as Report }).then((body) => { if (!controller.signal.aborted && currentRequest === requestId.current) setReport(body) }).catch((reason: unknown) => { if (!controller.signal.aborted && currentRequest === requestId.current) { setReport(null); setError(reason instanceof Error ? reason.message : 'Unable to load overview') } }).finally(() => { if (!controller.signal.aborted && currentRequest === requestId.current) setLoading(false) })
     return () => controller.abort()
-  }, [customError, customFrom, customTo, hasVisibleContent, page, period, search, selected.id, selectedToken, tokenWorkspace, workspaceLoading])
+  }, [customError, customFrom, customTo, hasVisibleContent, page, period, reload, search, selected.id, selectedToken, tokenWorkspace, workspaceLoading])
   return <div className="min-w-0 max-w-full"><PageHeader title="Overview" subtitle={`ภาพรวมกิจกรรมบนบล็อกเชนของ Workspace · ${selected.name}`} actions={hasVisibleContent ? <ReportFilters idPrefix="overview" tokens={tokens} token={selectedToken} period={period} customFrom={customFrom} customTo={customTo} disabled={tokensLoading} minDate={historyStart} maxDate={today} onTokenChange={(value) => { setSelectedToken(value); setPage(1) }} onPeriodChange={(value) => { setPeriod(value); setPage(1) }} onCustomFromChange={(value) => { setCustomFrom(value); setPage(1) }} onCustomToChange={(value) => { setCustomTo(value); setPage(1) }} /> : undefined} />
     {tokensError ? <div className="mb-4"><ErrorCard message={tokensError} onRetry={() => void loadTokens()} /></div> : null}
     {customError ? <div className="mb-4" role="alert"><ErrorCard message={customError} /></div> : null}
     {!tokensLoading && !tokensError && tokens.length === 0 ? <Card><div className="py-12 text-center"><div className="text-sm font-medium text-default">ยังไม่มีโทเคน KAP-20 ที่เปิดใช้งาน</div><p className="mt-1 text-xs text-muted">กรุณาให้ผู้ดูแลเพิ่มโทเคนหลักที่เปิดใช้งานก่อนดูรายงาน</p></div></Card> : null}
     {!hasVisibleContent ? <section role="status" className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-default px-6 py-12 text-center"><h2 className="text-base font-semibold text-default">ยังไม่มีรายงานให้แสดง</h2><p className="mt-2 max-w-md text-sm text-muted">คุณเปิดเมนูนี้ได้ แต่ยังไม่ได้รับสิทธิ์ดูกราฟหรือข้อมูล กรุณาติดต่อผู้ดูแลหากต้องการใช้งาน</p></section> : null}
-    {error ? <div className="mb-4"><ErrorCard message={error} /></div> : null}
-    {hasVisibleContent && tokens.length > 0 && !customError && !tokensError && (loading || tokensLoading || !report) ? <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <SkeletonKpi key={index} />)}</div> : report && !customError ? <>
+    {error ? <div className="mb-4"><ErrorCard message={error} onRetry={() => setReload((value) => value + 1)} /></div> : null}
+    {hasVisibleContent && tokens.length > 0 && !customError && !tokensError && (loading || tokensLoading || !report) ? <div aria-busy="true"><div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <SkeletonKpi key={index} />)}</div>{canViewMonthly ? <SkeletonCard height={400} /> : null}</div> : report && !customError ? <>
       <ReportScope from={report.period.from} to={report.period.to} timezone={report.timezone} dataThrough={report.dataThrough} comparisonNote={report.comparison ? `เทียบกับช่วง ${report.comparison.from} ถึง ${report.comparison.to} ข้อมูลของวันหรือเดือนปัจจุบันอาจยังไม่ครบ` : 'แสดงข้อมูลทั้งหมด หรือยังไม่มีข้อมูลช่วงก่อนหน้าที่นำมาเทียบได้'} scopeNote="ยอดรวมตามช่วงวันที่เลือก นับธุรกรรมเดียวเพียงครั้งเดียว แม้เกี่ยวข้องกับโทเคนหลายประเภท ส่วนตารางแสดงรายการโอนแต่ละรายการ" />
       {canViewKpis && <section aria-label="Primary business metrics" className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {canViewTotalTransactions && <KpiTile label="Total Transactions" subLabel="จำนวนธุรกรรมในช่วงวันที่เลือก นับธุรกรรมเดียวเพียงครั้งเดียว" value={formatAmount(report.kpis.totalTransactions.value)} change={report.kpis.totalTransactions.change} changeLabel={report.kpis.totalTransactions.changeLabel} icon="pulse" />}
@@ -105,7 +107,7 @@ export function OverviewDashboard(): React.JSX.Element {
         {canViewNftMint && <KpiTile label="Vouchers issued (Mint)" subLabel="จำนวน voucher ที่ออกให้ผู้ใช้ในช่วงวันที่เลือก" value={`${formatAmount(report.kpis.nftMint.value)} NFTs`} valueTrailing={<TokenAvatar src={report.kpis.nftMint.imageUrl} symbol="NFT" size="sm" />} change={report.kpis.nftMint.change} changeLabel={report.kpis.nftMint.changeLabel} icon="arrowUp" />}
         {canViewNftBurn && <KpiTile label="Vouchers used (Burn)" subLabel="จำนวน voucher ที่ใช้แล้วในช่วงวันที่เลือก" value={`${formatAmount(report.kpis.nftBurn.value)} NFTs`} valueTrailing={<TokenAvatar src={report.kpis.nftBurn.imageUrl} symbol="NFT" size="sm" />} change={report.kpis.nftBurn.change} changeLabel={report.kpis.nftBurn.changeLabel} icon="refresh" />}
       </section>}
-      {canViewMonthly && <Card className="mb-4" title="Monthly Transactions by Token Standard" subtitle="เปรียบเทียบจำนวนธุรกรรมรายเดือน แยกตามประเภทโทเคน สูงสุด 12 เดือนในช่วงที่เลือก ธุรกรรมเดียวอาจอยู่ได้หลายประเภท จึงไม่ควรนำแต่ละแท่งมาบวกกัน เดือนแรกหรือเดือนปัจจุบันอาจยังมีข้อมูลไม่เต็มเดือน">{report.monthly.length ? <BarChart data={report.monthly} showLegend height={300} tooltipValueFormat="integer" keys={[{ key: 'kap20', label: 'KAP-20 Token', color: 'var(--accent)' }, { key: 'kap22', label: 'KAP-22 Point Token', color: 'var(--accent-3)' }, { key: 'kap721', label: 'KAP-721 NFT', color: 'var(--success)' }]} /> : <div className="flex h-[300px] items-center justify-center text-sm text-muted">ไม่พบธุรกรรมในช่วงเวลานี้</div>}</Card>}
+      {canViewMonthly && <Card className="mb-4" title="Total Transactions" subtitle="จำนวนธุรกรรมไม่ซ้ำตามช่วงวันที่เลือก ผลรวมตรงกับ KPI Total Transactions · วันหรือเดือนปัจจุบันอาจยังมีข้อมูลไม่ครบ"><TransactionTimelineChart monthly={report.timeline.monthly} daily={report.timeline.daily} granularity={granularity} onGranularityChange={setGranularity} height={300} /></Card>}
       {canViewPointTokenDistributed && <Card className="mb-4" title="Point tokens distributed" subtitle="จำนวนคะแนนที่แจกในช่วงวันที่เลือก แสดงแยกแต่ละโทเคนเพื่อให้เปรียบเทียบได้ชัดเจน ไม่นำยอดต่างโทเคนมารวมกัน"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{report.kpis.kap22.map((metric) => <div key={metric.symbol} className="rounded-xl border border-default p-3"><div className="flex items-center gap-2 text-xs text-muted"><TokenAvatar src={metric.imageUrl} symbol={metric.symbol} size="sm" />{metric.symbol}</div><div className="mt-2 break-words font-mono text-lg font-semibold text-default">{formatAmount(metric.value)} {metric.symbol}</div><div className="mt-1"><ComparisonTag change={metric.change} label={metric.changeLabel} /></div></div>)}</div></Card>}
       {(canViewTotalGasFee || canViewRedemptionFee) && <section aria-label="Operational costs" className="mb-4 grid gap-4 sm:grid-cols-2">
         {canViewTotalGasFee && <KpiTile label="Total Gas Fee" subLabel="ค่าธรรมเนียมเครือข่ายรวมของธุรกรรมในช่วงวันที่เลือก" value={`${formatKub(report.kpis.totalGasFee.value)} KUB`} valueTrailing={<TokenAvatar src="/assets/tokens/kub.png" symbol="KUB" size="sm" />} icon="zap" />}

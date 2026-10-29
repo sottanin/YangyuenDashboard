@@ -9,10 +9,10 @@ import { getPreviousReportRange, parseReportDateRange, ReportPeriodError } from 
 const TIME_ZONE = 'Asia/Bangkok'
 const ZERO = '0x0000000000000000000000000000000000000000'
 const LIMIT = 20
-interface SummaryRow { total_transactions: bigint; total_fee: Prisma.Decimal; today_transactions: bigint; yesterday_transactions: bigint; today_fee: Prisma.Decimal; yesterday_fee: Prisma.Decimal }
+interface TimelinePoint { label: string; value: number }
+interface SummaryRow { daily: TimelinePoint[]; total_transactions: bigint; total_fee: Prisma.Decimal; today_transactions: bigint; yesterday_transactions: bigint; today_fee: Prisma.Decimal; yesterday_fee: Prisma.Decimal }
 interface AmountRow { metric: string; token_address: string | null; total: Prisma.Decimal; today: Prisma.Decimal; yesterday: Prisma.Decimal }
 interface NftRow { metric: string; total: bigint; today: bigint; yesterday: bigint }
-interface MonthlyRow { label: string; kap20: bigint; kap22: bigint; kap721: bigint }
 interface HistoryRow { key: string; tx_id: string; timestamp: Date; from_hash: string; to_hash: string; token_address: string; token_name: string; token_symbol: string; standard: string; type: string; value: string; token_id: string | null; status: string | null }
 interface CountRow { count: bigint }
 
@@ -76,13 +76,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const searchWhere = search ? Prisma.sql`(tx_id ILIKE ${pattern} ESCAPE '\\' OR from_hash ILIKE ${pattern} ESCAPE '\\' OR to_hash ILIKE ${pattern} ESCAPE '\\' OR token_name ILIKE ${pattern} ESCAPE '\\' OR token_symbol ILIKE ${pattern} ESCAPE '\\' OR COALESCE(token_id, '') ILIKE ${pattern} ESCAPE '\\')` : Prisma.sql`TRUE`
     const nftAssociation = singleKap20Root ? Prisma.empty : Prisma.sql`AND EXISTS (SELECT 1 FROM "RedemptionTransactionDetail" mint JOIN "TransactionDetail" payment ON payment."txId"=mint."txId" WHERE LOWER(mint."tokenAddress")=LOWER(d."tokenAddress") AND mint."tokenId"=d."tokenId" AND LOWER(mint."fromHash")=${ZERO} AND LOWER(payment."tokenAddress")=ANY(${kap20}) AND LOWER(payment."toHash")=ANY(${markets}) AND NOT(LOWER(payment."fromHash")=ANY(${registered})))`
 
-    const [summaryResult, amounts, nfts, monthly, rows, countResult] = await Promise.all([
+    const [summaryResult, amounts, nfts, rows, countResult] = await Promise.all([
       prisma.$queryRaw<SummaryRow[]>(Prisma.sql`
         WITH events AS (
           SELECT x."txId",x."timestamp",x.fee FROM "TransactionHeader" x WHERE x."timestamp">=${range.start} AND x."timestamp"<${range.end} AND EXISTS (SELECT 1 FROM "TransactionDetail" d WHERE d."txId"=x."txId" AND LOWER(d."tokenAddress")=ANY(${scoped}))
           UNION ALL SELECT x."txId",x."timestamp",x.fee FROM "RedemptionTransactionHeader" x WHERE x."timestamp">=${range.start} AND x."timestamp"<${range.end} AND EXISTS (SELECT 1 FROM "RedemptionTransactionDetail" d WHERE d."txId"=x."txId" AND LOWER(d."tokenAddress")=ANY(${kap721}) ${nftAssociation})
         ), h AS (SELECT "txId",MIN("timestamp") "timestamp",MAX(fee) fee FROM events GROUP BY "txId")
-        SELECT COUNT(*)::bigint total_transactions, COALESCE(SUM(fee),0) total_fee,
+        SELECT COALESCE((SELECT JSONB_AGG(JSONB_BUILD_OBJECT('label',label,'value',value) ORDER BY label) FROM (
+            SELECT TO_CHAR(${day},'YYYY-MM-DD') label,COUNT(*) value FROM h GROUP BY 1
+          ) daily_counts),'[]'::jsonb) daily,
+          COUNT(*)::bigint total_transactions, COALESCE(SUM(fee),0) total_fee,
           COUNT(*) FILTER (WHERE ${day}=(CURRENT_TIMESTAMP AT TIME ZONE ${TIME_ZONE})::date)::bigint today_transactions,
           COUNT(*) FILTER (WHERE ${day}=(CURRENT_TIMESTAMP AT TIME ZONE ${TIME_ZONE})::date-1)::bigint yesterday_transactions,
           COALESCE(SUM(fee) FILTER (WHERE ${day}=(CURRENT_TIMESTAMP AT TIME ZONE ${TIME_ZONE})::date),0) today_fee,
@@ -101,12 +104,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         WITH e AS (SELECT LOWER(d."fromHash") from_hash,LOWER(d."toHash") to_hash,d."timestamp" FROM "RedemptionTransactionDetail" d WHERE d."timestamp">=${range.start} AND d."timestamp"<${range.end} AND LOWER(d."tokenAddress")=ANY(${kap721}) ${nftAssociation}),
         m AS (SELECT 'mint'::text metric,* FROM e WHERE from_hash=${ZERO} AND NOT(to_hash=ANY(${registered})) UNION ALL SELECT 'burn',* FROM e WHERE NOT(from_hash=ANY(${registered})) AND to_hash=${ZERO})
         SELECT metric,COUNT(*)::bigint total,COUNT(*) FILTER(WHERE ${day}=(CURRENT_TIMESTAMP AT TIME ZONE ${TIME_ZONE})::date)::bigint today,COUNT(*) FILTER(WHERE ${day}=(CURRENT_TIMESTAMP AT TIME ZONE ${TIME_ZONE})::date-1)::bigint yesterday FROM m GROUP BY metric`),
-      prisma.$queryRaw<MonthlyRow[]>(Prisma.sql`
-        WITH e AS (
-          SELECT TO_CHAR(DATE_TRUNC('month',"timestamp" AT TIME ZONE 'UTC' AT TIME ZONE ${TIME_ZONE}),'YYYY-MM') label,"txId",CASE WHEN LOWER("tokenAddress")=ANY(${kap20}) THEN 'kap20' ELSE 'kap22' END kind FROM "TransactionDetail" WHERE "timestamp">=${range.start} AND "timestamp"<${range.end} AND LOWER("tokenAddress")=ANY(${scoped})
-          UNION ALL SELECT TO_CHAR(DATE_TRUNC('month',d."timestamp" AT TIME ZONE 'UTC' AT TIME ZONE ${TIME_ZONE}),'YYYY-MM'),d."txId",'kap721' FROM "RedemptionTransactionDetail" d WHERE d."timestamp">=${range.start} AND d."timestamp"<${range.end} AND LOWER(d."tokenAddress")=ANY(${kap721}) ${nftAssociation}
-        ), recent AS (SELECT DISTINCT label FROM e ORDER BY label DESC LIMIT 12)
-        SELECT e.label,COUNT(DISTINCT "txId") FILTER(WHERE kind='kap20')::bigint kap20,COUNT(DISTINCT "txId") FILTER(WHERE kind='kap22')::bigint kap22,COUNT(DISTINCT "txId") FILTER(WHERE kind='kap721')::bigint kap721 FROM e JOIN recent USING(label) GROUP BY e.label ORDER BY e.label`),
       prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
         WITH c AS (
           SELECT 'kap-'||d.key key,d."txId" tx_id,d."timestamp",d."fromHash" from_hash,d."toHash" to_hash,LOWER(d."tokenAddress") token_address,d."tokenName" token_name,d."tokenSymbol" token_symbol,COALESCE(t.standard,d."txType") standard,
@@ -157,7 +154,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const before = new Prisma.Decimal(previous); const now = new Prisma.Decimal(current)
       return { change: before.isZero() ? (now.isZero() ? 0 : null) : now.sub(before).div(before.abs()).mul(100).toDecimalPlaces(1).toNumber(), changeLabel: before.isZero() && !now.isZero() ? 'มีกิจกรรมใหม่เมื่อเทียบกับช่วงก่อนหน้า' : 'เทียบกับช่วงก่อนหน้าที่มีระยะเวลาเท่ากัน' }
     }
-    const summary = summaryResult[0] ?? { total_transactions: BigInt(0), total_fee: new Prisma.Decimal(0), today_transactions: BigInt(0), yesterday_transactions: BigInt(0), today_fee: new Prisma.Decimal(0), yesterday_fee: new Prisma.Decimal(0) }
+    const summary = summaryResult[0] ?? { daily: [], total_transactions: BigInt(0), total_fee: new Prisma.Decimal(0), today_transactions: BigInt(0), yesterday_transactions: BigInt(0), today_fee: new Prisma.Decimal(0), yesterday_fee: new Prisma.Decimal(0) }
     const plainAmounts = new Map(amounts.filter((r) => !r.token_address).map((r) => [r.metric, r]))
     const kap22Amounts = new Map(amounts.filter((r) => r.token_address).map((r) => [r.token_address as string, r]))
     const nftMap = new Map(nfts.map((r) => [r.metric, r]))
@@ -177,13 +174,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const netValue = Prisma.Decimal.max(new Prisma.Decimal(0), new Prisma.Decimal(grossRedeemed.value).sub(redemptionFee.value)).toString()
     const netPrevious = Prisma.Decimal.max(new Prisma.Decimal(0), dec(previousPlain.get('kap20Redeemed')).sub(dec(previousPlain.get('kap20Fee')))).toString()
     const netRedeemed = { value: netValue, ...comparison(netValue, netPrevious) }
-    const monthlyByLabel = new Map(monthly.map((row) => [row.label, row]))
-    const monthEnd = new Date(`${range.to.slice(0, 7)}-01T00:00:00Z`)
-    const monthStart = new Date(`${range.from.slice(0, 7)}-01T00:00:00Z`)
-    const cappedStart = new Date(monthEnd); cappedStart.setUTCMonth(cappedStart.getUTCMonth() - 11)
-    if (monthStart < cappedStart) monthStart.setTime(cappedStart.getTime())
-    const completeMonths: Array<{ label: string; kap20: number; kap22: number; kap721: number }> = []
-    for (const cursor = new Date(monthStart); cursor <= monthEnd; cursor.setUTCMonth(cursor.getUTCMonth() + 1)) { const label = cursor.toISOString().slice(0, 7); const row = monthlyByLabel.get(label); completeMonths.push({ label, kap20: Number(row?.kap20 ?? 0), kap22: Number(row?.kap22 ?? 0), kap721: Number(row?.kap721 ?? 0) }) }
+    // Both granularities come from the same deduplicated headers and statement snapshot as the KPI.
+    const dailyByLabel = new Map(summary.daily.map((point) => [point.label, point.value]))
+    const daily: TimelinePoint[] = []
+    const monthlyByLabel = new Map<string, number>()
+    const dayEnd = new Date(`${range.to}T00:00:00Z`)
+    for (const cursor = new Date(`${range.from}T00:00:00Z`); cursor <= dayEnd; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      const label = cursor.toISOString().slice(0, 10)
+      const value = dailyByLabel.get(label) ?? 0
+      daily.push({ label, value })
+      const month = label.slice(0, 7)
+      monthlyByLabel.set(month, (monthlyByLabel.get(month) ?? 0) + value)
+    }
+    const monthly = [...monthlyByLabel].map(([label, value]) => ({ label, value }))
     return NextResponse.json({ timezone: TIME_ZONE, period: { from: range.from, to: range.to }, dataThrough: latest[0]?.latest?.toISOString() ?? null, comparison: previousRange ? { from: previousRange.from, to: previousRange.to } : null, kpis: {
       totalTransactions: canAccessChart(admin, 'overview.total-transactions') ? { value: String(summary.total_transactions), ...comparison(String(summary.total_transactions), String(previousHeaders[0]?.total ?? 0)) } : hiddenMetric,
       dailyGasFee: hiddenMetric,
@@ -194,7 +197,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       kap22: canAccessChart(admin, 'overview.point-token-distributed') ? orderedKap22.map((t) => { const r = kap22Amounts.get(t.normalizedAddress.toLowerCase()); return { symbol: t.symbol || t.name, imageUrl: tokenImage(t), value: dec(r?.total).toString(), ...comparison(dec(r?.total).toString(), dec(previousPoints.get(t.normalizedAddress.toLowerCase())).toString()) } }) : [],
       nftMint: canAccessChart(admin, 'overview.nft-mint') ? { ...nftMetric('mint'), imageUrl: tokenImage(nftToken) } : hiddenMetric,
       nftBurn: canAccessChart(admin, 'overview.nft-burn') ? { ...nftMetric('burn'), imageUrl: tokenImage(nftToken) } : hiddenMetric,
-    }, monthly: showMonthly ? completeMonths : [],
+    }, timeline: { monthly: showMonthly ? monthly : [], daily: showMonthly ? daily : [] },
     transactions: showHistory ? { rows: rows.map((r) => ({ key:r.key,txId:r.tx_id,timestamp:r.timestamp.toISOString(),fromHash:r.from_hash,toHash:r.to_hash,fromName:names.get(r.from_hash.toLowerCase())??null,toName:names.get(r.to_hash.toLowerCase())??null,tokenAddress:r.token_address,tokenName:r.token_name,tokenSymbol:r.token_symbol,standard:r.standard,type:r.type,value:r.value,tokenId:r.token_id,status:r.status,imageUrl:r.standard === 'KAP-721' && r.token_id ? `/api/reports/nft-redemptions/image?workspace=${workspace}&contract=${encodeURIComponent(r.token_address)}&tokenId=${encodeURIComponent(r.token_id)}` : tokenImage(tokenByAddress.get(r.token_address)) })), total, page, totalPages: Math.max(1,Math.ceil(total/LIMIT)) } : { rows: [], total: 0, page: 1, totalPages: 1 } })
   } catch (error) {
     if (error instanceof ReportPeriodError) return NextResponse.json({ error: error.message }, { status: 400 })
