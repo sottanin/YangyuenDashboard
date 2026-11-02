@@ -136,18 +136,19 @@ function ProgressBar({ label, value, detail }: { label: string; value: number; d
 function EditDataPanel(): React.JSX.Element {
   const [userId, setUserId] = useState('')
   const [metricType, setMetricType] = useState('')
-  const [date, setDate] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [rows, setRows] = useState<EditableRow[]>([])
   const [searched, setSearched] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const canSearch = userId.trim().length > 0 && metricType.length > 0 && date.length > 0 && !loading
+  const canSearch = userId.trim().length > 0 && metricType.length > 0 && dateFrom.length > 0 && dateTo.length > 0 && dateFrom <= dateTo && !loading
 
   async function search(): Promise<void> {
     if (!canSearch) return
-    setLoading(true); setError(''); setSearched(false)
+    setLoading(true); setRows([]); setError(''); setSearched(false)
     try {
-      const response = await fetch('/api/fitivity-data/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: userId.trim(), metricType, date }) })
+      const response = await fetch('/api/fitivity-data/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: userId.trim(), metricType, dateFrom, dateTo }) })
       const body = await response.json() as { rows?: EditableRow[]; error?: string }
       if (!response.ok) throw new Error(body.error ?? 'Unable to search Fitivity data')
       setRows(body.rows ?? []); setSearched(true)
@@ -161,16 +162,18 @@ function EditDataPanel(): React.JSX.Element {
   }
 
   return <Card noPad>
-    <div className="border-b border-default px-5 py-4"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent/10 text-accent"><Icon name="edit" /></span><div><h2 className="font-semibold text-default">Edit Fitivity data</h2><p className="mt-0.5 text-xs text-muted">Enter all three search values. Only Total Value and IsCal can be changed.</p></div></div></div>
-    <div className="grid gap-3 p-5 md:grid-cols-[minmax(220px,1fr)_minmax(220px,.7fr)_minmax(170px,.45fr)_auto] md:items-end">
-      <label className="flex flex-col gap-1 text-xs font-medium text-muted">User ID<input className="input min-h-11" value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Exact User ID" /></label>
-      <label className="flex flex-col gap-1 text-xs font-medium text-muted">Metric Type<select className="input min-h-11" value={metricType} onChange={(event) => setMetricType(event.target.value)}><option value="">Select metric</option><option value="steps">steps</option><option value="active_energy_burned">active_energy_burned</option><option value="sleep_awake">sleep_awake</option><option value="sleep_deep">sleep_deep</option><option value="sleep_light">sleep_light</option><option value="sleep_rem">sleep_rem</option></select></label>
-      <label className="flex flex-col gap-1 text-xs font-medium text-muted">Date<input className="input min-h-11" type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+    <div className="border-b border-default px-5 py-4"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent/10 text-accent"><Icon name="edit" /></span><div><h2 className="font-semibold text-default">Edit Fitivity data</h2><p className="mt-0.5 text-xs text-muted">Search by User ID or mapped Wallet Address, Metric Type and an inclusive date range. Only Total Value and IsCal can be changed.</p></div></div></div>
+    <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_minmax(220px,.7fr)_minmax(150px,.45fr)_minmax(150px,.45fr)_auto] md:items-end">
+      <label className="flex flex-col gap-1 text-xs font-medium text-muted">User ID or Wallet Address<input className="input min-h-11" value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Exact User ID or 0x…" disabled={loading} /></label>
+      <label className="flex flex-col gap-1 text-xs font-medium text-muted">Metric Type<select disabled={loading} className="input min-h-11" value={metricType} onChange={(event) => setMetricType(event.target.value)}><option value="">Select metric</option><option value="steps">steps</option><option value="active_energy_burned">active_energy_burned</option><option value="sleep_awake">sleep_awake</option><option value="sleep_deep">sleep_deep</option><option value="sleep_light">sleep_light</option><option value="sleep_rem">sleep_rem</option></select></label>
+      <label className="flex flex-col gap-1 text-xs font-medium text-muted">From<input className="input min-h-11" type="date" disabled={loading} value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); if (!dateTo) setDateTo(event.target.value) }} /></label>
+      <label className="flex flex-col gap-1 text-xs font-medium text-muted">To<input className="input min-h-11" type="date" disabled={loading} min={dateFrom || undefined} value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>
       <button type="button" className="btn btn-primary min-h-11" disabled={!canSearch} onClick={() => void search()}><Icon name="search" />{loading ? 'Searching…' : 'Search'}</button>
     </div>
+    {dateFrom && dateTo && dateFrom > dateTo ? <p role="alert" className="mx-5 mb-3 text-sm text-danger">From date must not be after To date.</p> : null}
     {error ? <div className="mx-5 mb-5 rounded-xl border border-red-400/30 bg-red-400/5 px-4 py-3 text-sm text-red-300" role="alert">{error}</div> : null}
     {searched ? <div className="border-t border-default">
-      {rows.length ? <div className="overflow-x-auto thin-scroll"><table className="w-full min-w-[1060px] text-sm"><thead><tr className="border-b border-default text-left text-[10px] uppercase tracking-wider text-faint"><th className="px-4 py-3">User ID</th><th className="px-4 py-3">Metric Type</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Workspace</th><th className="px-4 py-3 text-right">Count</th><th className="px-4 py-3">Unit</th><th className="px-4 py-3">Editable values</th></tr></thead><tbody>{rows.map((row) => <EditableDataRow key={row.id} row={row} onSaved={replaceRow} />)}</tbody></table></div> : <div className="px-5 py-12 text-center text-sm text-muted">No Fitivity data matches all three values.</div>}
+      {rows.length ? <div className="overflow-x-auto thin-scroll"><table className="w-full min-w-[1060px] text-sm"><thead><tr className="border-b border-default text-left text-[10px] uppercase tracking-wider text-faint"><th className="px-4 py-3">User ID</th><th className="px-4 py-3">Metric Type</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Workspace</th><th className="px-4 py-3 text-right">Count</th><th className="px-4 py-3">Unit</th><th className="px-4 py-3">Editable values</th></tr></thead><tbody>{rows.map((row) => <EditableDataRow key={row.id} row={row} onSaved={replaceRow} />)}</tbody></table></div> : <div className="px-5 py-12 text-center text-sm text-muted">No Fitivity data matches this identity, metric and date range.</div>}
     </div> : null}
   </Card>
 }

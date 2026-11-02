@@ -28,6 +28,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const showMonthly = canAccessChart(admin, 'overview.monthly-transactions')
     const showHistory = canAccessChart(admin, 'overview.transaction-history')
     const url = new URL(request.url)
+    if (url.searchParams.get('export') === '1' && !showHistory) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const workspace = parseWorkspaceSelection(url.searchParams.get('workspace'))
     if (workspace === null || workspace === 'all') return NextResponse.json({ error: 'Select a workspace' }, { status: 400 })
     if (!canAccessWorkspace(admin, workspace)) return NextResponse.json({ error: 'Workspace access denied' }, { status: 403 })
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const pattern = `%${search.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`
     const scope = await getWorkspaceReportScope(workspace)
     const range = await parseReportDateRange(url.searchParams)
-    const previousRange = await getPreviousReportRange(range)
+    const previousRange = url.searchParams.get('export') === '1' ? null : await getPreviousReportRange(range)
     const selectedToken = normalizeAddress(url.searchParams.get('token') ?? '')
     const [tokens, addresses, registry] = await Promise.all([
       prisma.tokenContract.findMany({ where: { OR: [{ workspaceId: workspace }, { active: true, standard: 'KAP-721', aggregateAcrossWorkspaces: true }] }, select: { id: true, workspaceId: true, normalizedAddress: true, name: true, symbol: true, standard: true, imageKey: true, active: true } }),
@@ -76,6 +77,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const searchWhere = search ? Prisma.sql`(tx_id ILIKE ${pattern} ESCAPE '\\' OR from_hash ILIKE ${pattern} ESCAPE '\\' OR to_hash ILIKE ${pattern} ESCAPE '\\' OR token_name ILIKE ${pattern} ESCAPE '\\' OR token_symbol ILIKE ${pattern} ESCAPE '\\' OR COALESCE(token_id, '') ILIKE ${pattern} ESCAPE '\\')` : Prisma.sql`TRUE`
     const nftAssociation = singleKap20Root ? Prisma.empty : Prisma.sql`AND EXISTS (SELECT 1 FROM "RedemptionTransactionDetail" mint JOIN "TransactionDetail" payment ON payment."txId"=mint."txId" WHERE LOWER(mint."tokenAddress")=LOWER(d."tokenAddress") AND mint."tokenId"=d."tokenId" AND LOWER(mint."fromHash")=${ZERO} AND LOWER(payment."tokenAddress")=ANY(${kap20}) AND LOWER(payment."toHash")=ANY(${markets}) AND NOT(LOWER(payment."fromHash")=ANY(${registered})))`
 
+    const historyQuery = (limit: number, offset: number): Prisma.Sql => Prisma.sql`
+        WITH c AS (
+          SELECT 'kap-'||d.key key,d."txId" tx_id,d."timestamp",d."fromHash" from_hash,d."toHash" to_hash,LOWER(d."tokenAddress") token_address,d."tokenName" token_name,d."tokenSymbol" token_symbol,COALESCE(t.standard,d."txType") standard,
+            CASE WHEN LOWER(d."fromHash")=${ZERO} THEN 'Mint' WHEN LOWER(d."toHash")=${ZERO} THEN 'Burn' ELSE 'Transfer' END type,
+            d.value::text value,NULL::text token_id,h.status FROM "TransactionDetail" d JOIN "TransactionHeader" h USING("txId") LEFT JOIN "TokenContract" t ON t."normalizedAddress"=LOWER(d."tokenAddress") AND t."workspaceId"=${workspace} WHERE d."timestamp">=${range.start} AND d."timestamp"<${range.end} AND LOWER(d."tokenAddress")=ANY(${scoped})
+          UNION ALL SELECT 'nft-'||d.key,d."txId",d."timestamp",d."fromHash",d."toHash",LOWER(d."tokenAddress"),d."tokenName",d."tokenSymbol",'KAP-721',
+            CASE WHEN LOWER(d."fromHash")=${ZERO} THEN 'Mint' WHEN LOWER(d."toHash")=${ZERO} THEN 'Burn' ELSE 'Transfer' END,
+            '1',d."tokenId",h.status FROM "RedemptionTransactionDetail" d JOIN "RedemptionTransactionHeader" h USING("txId") WHERE d."timestamp">=${range.start} AND d."timestamp"<${range.end} AND LOWER(d."tokenAddress")=ANY(${kap721}) ${nftAssociation}
+        ) SELECT * FROM c WHERE ${searchWhere} ORDER BY "timestamp" DESC,key DESC OFFSET ${offset} LIMIT ${limit}`
+    const tokenByAddress = new Map(tokens.map((token) => [token.normalizedAddress.toLowerCase(), token]))
+    const tokenImage = (token: typeof tokens[number] | undefined): string | null => token?.imageKey ? `/api/contracts/token/${token.id}/image` : null
+    const mapHistory = (r: HistoryRow) => ({ key:r.key,txId:r.tx_id,timestamp:r.timestamp.toISOString(),fromHash:r.from_hash,toHash:r.to_hash,fromName:names.get(r.from_hash.toLowerCase())??null,toName:names.get(r.to_hash.toLowerCase())??null,tokenAddress:r.token_address,tokenName:r.token_name,tokenSymbol:r.token_symbol,standard:r.standard,type:r.type,value:r.value,tokenId:r.token_id,status:r.status,imageUrl:r.standard === 'KAP-721' && r.token_id ? `/api/reports/nft-redemptions/image?workspace=${workspace}&contract=${encodeURIComponent(r.token_address)}&tokenId=${encodeURIComponent(r.token_id)}` : tokenImage(tokenByAddress.get(r.token_address)) })
+    if (url.searchParams.get('export') === '1') {
+      if (!showHistory) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      const exportRows = await prisma.$queryRaw<HistoryRow[]>(historyQuery(50_001, 0))
+      if (exportRows.length > 50_000) return NextResponse.json({ error: 'More than 50,000 events match. Narrow the date range or search before exporting.' }, { status: 422 })
+      return NextResponse.json({ rows: exportRows.map(mapHistory), timezone: TIME_ZONE, period: { from: range.from, to: range.to } })
+    }
     const [summaryResult, amounts, nfts, rows, countResult] = await Promise.all([
       prisma.$queryRaw<SummaryRow[]>(Prisma.sql`
         WITH events AS (
@@ -104,15 +123,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         WITH e AS (SELECT LOWER(d."fromHash") from_hash,LOWER(d."toHash") to_hash,d."timestamp" FROM "RedemptionTransactionDetail" d WHERE d."timestamp">=${range.start} AND d."timestamp"<${range.end} AND LOWER(d."tokenAddress")=ANY(${kap721}) ${nftAssociation}),
         m AS (SELECT 'mint'::text metric,* FROM e WHERE from_hash=${ZERO} AND NOT(to_hash=ANY(${registered})) UNION ALL SELECT 'burn',* FROM e WHERE NOT(from_hash=ANY(${registered})) AND to_hash=${ZERO})
         SELECT metric,COUNT(*)::bigint total,COUNT(*) FILTER(WHERE ${day}=(CURRENT_TIMESTAMP AT TIME ZONE ${TIME_ZONE})::date)::bigint today,COUNT(*) FILTER(WHERE ${day}=(CURRENT_TIMESTAMP AT TIME ZONE ${TIME_ZONE})::date-1)::bigint yesterday FROM m GROUP BY metric`),
-      prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
-        WITH c AS (
-          SELECT 'kap-'||d.key key,d."txId" tx_id,d."timestamp",d."fromHash" from_hash,d."toHash" to_hash,LOWER(d."tokenAddress") token_address,d."tokenName" token_name,d."tokenSymbol" token_symbol,COALESCE(t.standard,d."txType") standard,
-            CASE WHEN LOWER(d."fromHash")=${ZERO} THEN 'Mint' WHEN LOWER(d."toHash")=${ZERO} THEN 'Burn' ELSE 'Transfer' END type,
-            d.value::text value,NULL::text token_id,h.status FROM "TransactionDetail" d JOIN "TransactionHeader" h USING("txId") LEFT JOIN "TokenContract" t ON t."normalizedAddress"=LOWER(d."tokenAddress") AND t."workspaceId"=${workspace} WHERE d."timestamp">=${range.start} AND d."timestamp"<${range.end} AND LOWER(d."tokenAddress")=ANY(${scoped})
-          UNION ALL SELECT 'nft-'||d.key,d."txId",d."timestamp",d."fromHash",d."toHash",LOWER(d."tokenAddress"),d."tokenName",d."tokenSymbol",'KAP-721',
-            CASE WHEN LOWER(d."fromHash")=${ZERO} THEN 'Mint' WHEN LOWER(d."toHash")=${ZERO} THEN 'Burn' ELSE 'Transfer' END,
-            '1',d."tokenId",h.status FROM "RedemptionTransactionDetail" d JOIN "RedemptionTransactionHeader" h USING("txId") WHERE d."timestamp">=${range.start} AND d."timestamp"<${range.end} AND LOWER(d."tokenAddress")=ANY(${kap721}) ${nftAssociation}
-        ) SELECT * FROM c WHERE ${searchWhere} ORDER BY "timestamp" DESC,key DESC OFFSET ${(page - 1) * LIMIT} LIMIT ${LIMIT}`),
+      prisma.$queryRaw<HistoryRow[]>(historyQuery(LIMIT, (page - 1) * LIMIT)),
       prisma.$queryRaw<CountRow[]>(Prisma.sql`
         WITH c AS (
           SELECT d."txId" tx_id,d."fromHash" from_hash,d."toHash" to_hash,d."tokenName" token_name,d."tokenSymbol" token_symbol,NULL::text token_id FROM "TransactionDetail" d WHERE d."timestamp">=${range.start} AND d."timestamp"<${range.end} AND LOWER(d."tokenAddress")=ANY(${scoped})
@@ -161,13 +172,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const amountMetric = (key: string) => { const value = dec(plainAmounts.get(key)?.total).toString(); return { value, ...comparison(value, dec(previousPlain.get(key)).toString()) } }
     const nftMetric = (key: string) => { const value = String(nftMap.get(key)?.total ?? BigInt(0)); return { value, ...comparison(value, String(previousNftMap.get(key) ?? BigInt(0))) } }
     const total = Number(countResult[0]?.count ?? BigInt(0))
-    const tokenByAddress = new Map(tokens.map((token) => [token.normalizedAddress.toLowerCase(), token]))
     const kap20Token = selectedKap20
     const nftTokens = tokens.filter((token) => token.standard?.toUpperCase() === 'KAP-721')
     const nftToken = nftTokens.find((token) => token.workspaceId === workspace) ?? nftTokens[0]
     const canonicalOrder = new Map(['FIT', 'GRN', 'INT', 'TGT'].map((symbol, index) => [symbol, index]))
     const orderedKap22 = [...kap22Tokens].sort((a, b) => (canonicalOrder.get((a.symbol ?? '').toUpperCase()) ?? 100) - (canonicalOrder.get((b.symbol ?? '').toUpperCase()) ?? 100) || (a.symbol ?? a.name).localeCompare(b.symbol ?? b.name))
-    const tokenImage = (token: typeof tokens[number] | undefined): string | null => token?.imageKey ? `/api/contracts/token/${token.id}/image` : null
     const hiddenMetric = { value: '0', change: 0 }
     const grossRedeemed = amountMetric('kap20Redeemed')
     const redemptionFee = amountMetric('kap20Fee')
@@ -198,7 +207,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       nftMint: canAccessChart(admin, 'overview.nft-mint') ? { ...nftMetric('mint'), imageUrl: tokenImage(nftToken) } : hiddenMetric,
       nftBurn: canAccessChart(admin, 'overview.nft-burn') ? { ...nftMetric('burn'), imageUrl: tokenImage(nftToken) } : hiddenMetric,
     }, timeline: { monthly: showMonthly ? monthly : [], daily: showMonthly ? daily : [] },
-    transactions: showHistory ? { rows: rows.map((r) => ({ key:r.key,txId:r.tx_id,timestamp:r.timestamp.toISOString(),fromHash:r.from_hash,toHash:r.to_hash,fromName:names.get(r.from_hash.toLowerCase())??null,toName:names.get(r.to_hash.toLowerCase())??null,tokenAddress:r.token_address,tokenName:r.token_name,tokenSymbol:r.token_symbol,standard:r.standard,type:r.type,value:r.value,tokenId:r.token_id,status:r.status,imageUrl:r.standard === 'KAP-721' && r.token_id ? `/api/reports/nft-redemptions/image?workspace=${workspace}&contract=${encodeURIComponent(r.token_address)}&tokenId=${encodeURIComponent(r.token_id)}` : tokenImage(tokenByAddress.get(r.token_address)) })), total, page, totalPages: Math.max(1,Math.ceil(total/LIMIT)) } : { rows: [], total: 0, page: 1, totalPages: 1 } })
+    transactions: showHistory ? { rows: rows.map(mapHistory), total, page, totalPages: Math.max(1,Math.ceil(total/LIMIT)) } : { rows: [], total: 0, page: 1, totalPages: 1 } })
   } catch (error) {
     if (error instanceof ReportPeriodError) return NextResponse.json({ error: error.message }, { status: 400 })
     if (error instanceof WorkspaceNotFoundError) return NextResponse.json({ error: error.message }, { status: 404 })

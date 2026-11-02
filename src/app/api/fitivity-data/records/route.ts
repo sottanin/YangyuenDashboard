@@ -28,19 +28,28 @@ function serialize(row: {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await authorize()
   if (denied) return denied
-  const body = await request.json().catch(() => null) as { userId?: unknown; metricType?: unknown; date?: unknown } | null
-  const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
+  const body = await request.json().catch(() => null) as { identifier?: unknown; userId?: unknown; metricType?: unknown; dateFrom?: unknown; dateTo?: unknown; date?: unknown } | null
+  const identifier = typeof body?.identifier === 'string' ? body.identifier.trim() : typeof body?.userId === 'string' ? body.userId.trim() : ''
   const metricType = typeof body?.metricType === 'string' ? body.metricType : ''
-  const date = typeof body?.date === 'string' ? body.date : ''
-  if (!userId || userId.length > 200 || !METRIC_TYPES.has(metricType) || !validDate(date)) {
-    return NextResponse.json({ error: 'User ID, Metric Type, and a valid Date are required' }, { status: 400 })
+  const dateFrom = typeof body?.dateFrom === 'string' ? body.dateFrom : typeof body?.date === 'string' ? body.date : ''
+  const dateTo = typeof body?.dateTo === 'string' ? body.dateTo : dateFrom
+  if (!identifier || identifier.length > 200 || !METRIC_TYPES.has(metricType) || !validDate(dateFrom) || !validDate(dateTo) || dateFrom > dateTo) {
+    return NextResponse.json({ error: 'User ID or Wallet Address, Metric Type, and a valid From / To date range are required' }, { status: 400 })
   }
+  const isWallet = /^0x[0-9a-f]{40}$/i.test(identifier)
+  const mappings = isWallet ? await prisma.walletMapping.findMany({
+    where: { normalizedWalletAddress: identifier.toLowerCase() },
+    select: { workspaceId: true, normalizedUserId: true },
+  }) : []
+  // Keep each wallet mapping paired with its workspace; user IDs can repeat across workspaces.
+  const identities: Prisma.FitivityDataWhereInput[] = [{ userId: { equals: identifier, mode: 'insensitive' } }, ...mappings.map((mapping) => ({ workspaceId: mapping.workspaceId, userId: { equals: mapping.normalizedUserId, mode: 'insensitive' as const } }))]
   const rows = await prisma.fitivityData.findMany({
-    where: { userId, metricType, date: new Date(`${date}T00:00:00.000Z`) },
+    where: { OR: identities, metricType, date: { gte: new Date(`${dateFrom}T00:00:00.000Z`), lte: new Date(`${dateTo}T00:00:00.000Z`) } },
     select: { id: true, userId: true, metricType: true, totalValue: true, count: true, unit: true, date: true, window: true, isCal: true, updatedAt: true, workspace: { select: { id: true, name: true } } },
-    orderBy: { workspace: { name: 'asc' } },
-    take: 100,
+    orderBy: [{ date: 'asc' }, { workspace: { name: 'asc' } }, { userId: 'asc' }, { id: 'asc' }],
+    take: 1001,
   })
+  if (rows.length > 1000) return NextResponse.json({ error: 'More than 1,000 records match. Narrow the date range and search again.' }, { status: 422 })
   return NextResponse.json({ rows: rows.map(serialize) })
 }
 

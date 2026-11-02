@@ -7,6 +7,8 @@ import { ReportScope } from '@/components/reports/ReportScope'
 import { MetricDistributionChart, type MetricDistributionPoint } from '@/components/charts/MetricDistributionChart'
 import { RankedMetricBarChart, type RankedMetricPoint } from '@/components/charts/RankedMetricBarChart'
 import { PeriodFilter } from '@/components/reports/PeriodFilter'
+import { ExportDataButton } from '@/components/reports/ExportDataButton'
+import { excelDecimal } from '@/lib/reporting/exportExcel'
 import { Card } from '@/components/ui/Card'
 import { ErrorCard } from '@/components/ui/ErrorCard'
 import { KpiTile } from '@/components/ui/KpiTile'
@@ -117,21 +119,21 @@ export function FitivityOverviewDashboard(): React.JSX.Element {
         {visible.totalSleep && report.kpis.sleep ? <PerformanceKpi metric="sleep" value={report.kpis.sleep} /> : null}
       </section> : null}
       <section className="mb-4 grid gap-4 xl:grid-cols-3" aria-label="Fitivity daily trends">
-        {visible.stepsTrend ? <TrendCard metric="steps" data={report.trends.steps} from={report.period.from} to={report.period.to} /> : null}
-        {visible.caloriesTrend ? <TrendCard metric="calories" data={report.trends.calories} from={report.period.from} to={report.period.to} /> : null}
-        {visible.sleepTrend ? <TrendCard metric="sleep" data={report.trends.sleep} from={report.period.from} to={report.period.to} /> : null}
+        {visible.stepsTrend ? <TrendCard metric="steps" data={report.trends.steps} from={report.period.from} to={report.period.to} exportScope={`workspace-${selected.id}-${report.period.from}-${report.period.to}`} /> : null}
+        {visible.caloriesTrend ? <TrendCard metric="calories" data={report.trends.calories} from={report.period.from} to={report.period.to} exportScope={`workspace-${selected.id}-${report.period.from}-${report.period.to}`} /> : null}
+        {visible.sleepTrend ? <TrendCard metric="sleep" data={report.trends.sleep} from={report.period.from} to={report.period.to} exportScope={`workspace-${selected.id}-${report.period.from}-${report.period.to}`} /> : null}
       </section>
       <section className="mb-4 grid gap-4 xl:grid-cols-3" aria-label="Fitivity user distributions">
-        {visible.stepsDistribution ? <DistributionCard title="Users by Average Daily Steps" data={report.distributions.steps} color="var(--success)" /> : null}
-        {visible.caloriesDistribution ? <DistributionCard title="Users by Average Daily Calories Burn" data={report.distributions.calories} color="var(--warn)" /> : null}
-        {visible.sleepDistribution ? <DistributionCard title="Users by Average Daily Sleep Hour" data={report.distributions.sleep} color="var(--accent)" /> : null}
+        {visible.stepsDistribution ? <DistributionCard title="Users by Average Daily Steps" exportScope={`workspace-${selected.id}-${report.period.from}-${report.period.to}`} data={report.distributions.steps} color="var(--success)" /> : null}
+        {visible.caloriesDistribution ? <DistributionCard title="Users by Average Daily Calories Burn" exportScope={`workspace-${selected.id}-${report.period.from}-${report.period.to}`} data={report.distributions.calories} color="var(--warn)" /> : null}
+        {visible.sleepDistribution ? <DistributionCard title="Users by Average Daily Sleep Hour" exportScope={`workspace-${selected.id}-${report.period.from}-${report.period.to}`} data={report.distributions.sleep} color="var(--accent)" /> : null}
       </section>
       <section className="grid gap-4 xl:grid-cols-3" aria-label="Top Fitivity users">
-        {visible.topSteps ? <RankCard title="Highest recorded steps" data={report.topUsers.steps} cumulativeData={report.topUsersCumulative.steps} unit="steps" color="var(--success)" digits={0} period={period} from={customFrom} to={customTo} /> : null}
-        {visible.topCalories ? <RankCard title="Highest recorded active calories" data={report.topUsers.calories} cumulativeData={report.topUsersCumulative.calories} unit="kcal" color="var(--warn)" digits={2} period={period} from={customFrom} to={customTo} /> : null}
-        {visible.topSleep ? <RankCard title="Highest recorded sleep duration" data={report.topUsers.sleep} cumulativeData={report.topUsersCumulative.sleep} unit="hours" color="var(--accent)" digits={2} period={period} from={customFrom} to={customTo} /> : null}
+        {visible.topSteps ? <RankCard title="Highest recorded steps" exportScope={`workspace-${selected.id}-${report.period.from}-${report.period.to}`} data={report.topUsers.steps} cumulativeData={report.topUsersCumulative.steps} unit="steps" color="var(--success)" digits={0} period={period} from={customFrom} to={customTo} /> : null}
+        {visible.topCalories ? <RankCard title="Highest recorded active calories" exportScope={`workspace-${selected.id}-${report.period.from}-${report.period.to}`} data={report.topUsers.calories} cumulativeData={report.topUsersCumulative.calories} unit="kcal" color="var(--warn)" digits={2} period={period} from={customFrom} to={customTo} /> : null}
+        {visible.topSleep ? <RankCard title="Highest recorded sleep duration" exportScope={`workspace-${selected.id}-${report.period.from}-${report.period.to}`} data={report.topUsers.sleep} cumulativeData={report.topUsersCumulative.sleep} unit="hours" color="var(--accent)" digits={2} period={period} from={customFrom} to={customTo} /> : null}
       </section>
-      {visible.userSummary ? <UserSummaryTable key={`${selected.id}:${period}:${customFrom}:${customTo}`} rows={report.userSummary} workspace={selected.id} period={period} from={customFrom} to={customTo} /> : null}
+      {visible.userSummary ? <UserSummaryTable key={`${selected.id}:${period}:${customFrom}:${customTo}`} exportScope={`workspace-${selected.id}-${report.period.from}-${report.period.to}`} rows={report.userSummary} workspace={selected.id} period={period} from={customFrom} to={customTo} /> : null}
     </> : null}
   </div>
 }
@@ -144,7 +146,7 @@ function PerformanceKpi({ metric, value }: { metric: keyof typeof metricConfig; 
   return <KpiTile label={titles[metric]} value={value.average === null ? '—' : `${format(value.average, config.digits)} ${config.unit}`} subLabel={`ผู้มีข้อมูล ${value.users.toLocaleString()} คน · มีรายงานจากผู้ใช้รวม ${value.personDays.toLocaleString()} วัน · ${value.coverage === null ? 'ยังไม่มีข้อมูลเพียงพอสำหรับคำนวณสัดส่วน' : `มีข้อมูล ${value.coverage}% ของวันที่นำมาคำนวณ`} · ยอดรวม ${format(value.total, config.digits)} ${config.unit}${value.previousAverage === null ? ' · ยังไม่มีค่าเฉลี่ยช่วงก่อนหน้า' : ` · ค่าเฉลี่ยรายวันช่วงก่อนหน้า ${format(value.previousAverage, config.digits)} ${config.unit}`}`} change={value.change} changeLabel={changeLabel} icon={icons[metric]} />
 }
 
-function TrendCard({ metric, data, from, to }: { metric: keyof typeof metricConfig; data: TrendPoint[]; from: string; to: string }): React.JSX.Element {
+function TrendCard({ metric, data, from, to, exportScope }: { exportScope: string; metric: keyof typeof metricConfig; data: TrendPoint[]; from: string; to: string }): React.JSX.Element {
   const [mode, setMode] = useState<'daily' | 'cumulative'>('daily')
   const config = metricConfig[metric]
   const byDate = new Map(data.map((point) => [point.date, point]))
@@ -157,24 +159,24 @@ function TrendCard({ metric, data, from, to }: { metric: keyof typeof metricConf
   const mean = personDays ? data.reduce((total, point) => total + Number(point.average) * point.users, 0) / personDays : undefined
   const labels = { daily: 'ค่าเฉลี่ยรายวัน', cumulative: 'ยอดสะสมทั้งหมด' }
   const cumulativeTitles = { steps: 'Recorded steps · cumulative', calories: 'Recorded active calories · cumulative', sleep: 'Recorded sleep hours · cumulative' }
-  return <Card className="min-w-0" title={mode === 'cumulative' ? cumulativeTitles[metric] : config.title} subtitle="ใช้เฉพาะวันที่มีรายงาน · ช่องว่างหมายถึงไม่มีข้อมูล ไม่ใช่ศูนย์">
+  return <Card className="min-w-0" action={<ExportDataButton title={config.title} filename={`${config.title}-${mode}-${exportScope}`} disabled={data.length === 0} getData={() => ({ headers: ['Date', 'Value', 'Total Users', 'Unit'], rows: data.map((point) => [point.date, excelDecimal(mode === 'daily' ? point.average : point.accumulated), point.users, mode === 'daily' ? `${config.unit}/day` : config.unit]) })} />} title={mode === 'cumulative' ? cumulativeTitles[metric] : config.title} subtitle="ใช้เฉพาะวันที่มีรายงาน · ช่องว่างหมายถึงไม่มีข้อมูล ไม่ใช่ศูนย์">
     <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label={`${config.title} display mode`}>{(['daily', 'cumulative'] as const).map((value) => <button key={value} type="button" className={`btn min-h-11 text-xs ${mode === value ? 'btn-primary' : 'btn-ghost'}`} aria-pressed={mode === value} onClick={() => setMode(value)}>{labels[value]}</button>)}</div>
     {data.length ? <SingleLineChart data={points} label={labels[mode]} tooltipUnit={config.unit} color={config.color} fractionDigits={config.digits} showAverage={mode === 'daily'} referenceValue={mean} referenceLabel="ค่าเฉลี่ยจากวันที่มีรายงานของแต่ละคน" height={280} /> : <Empty label="ไม่พบข้อมูลกิจกรรมในช่วงเวลานี้" />}
   </Card>
 }
 
-function DistributionCard({ title, data, color }: { title: string; data: MetricDistributionPoint[]; color: string }): React.JSX.Element {
+function DistributionCard({ title, data, color, exportScope }: { title: string; data: MetricDistributionPoint[]; color: string; exportScope: string }): React.JSX.Element {
   const hasUsers = data.some((point) => point.count > 0)
-  return <Card title={title} subtitle="แบ่งกลุ่มผู้ใช้งานตามค่าเฉลี่ยต่อวันจากวันที่มีข้อมูลในช่วงเวลาที่เลือก">{hasUsers ? <MetricDistributionChart data={data} color={color} ariaLabel={title} /> : <Empty label="ไม่พบข้อมูลผู้ใช้งานในช่วงเวลานี้" />}</Card>
+  return <Card title={title} action={<ExportDataButton title={title} filename={`${title}-${exportScope}`} disabled={!hasUsers} getData={() => ({ headers: ['Range', 'Users'], rows: data.map((point) => [point.label, point.count]) })} />} subtitle="แบ่งกลุ่มผู้ใช้งานตามค่าเฉลี่ยต่อวันจากวันที่มีข้อมูลในช่วงเวลาที่เลือก">{hasUsers ? <MetricDistributionChart data={data} color={color} ariaLabel={title} /> : <Empty label="ไม่พบข้อมูลผู้ใช้งานในช่วงเวลานี้" />}</Card>
 }
 
-function RankCard({ title, data, cumulativeData, unit, color, digits, period, from, to }: { title: string; data: RankedMetricPoint[]; cumulativeData: RankedMetricPoint[]; unit: string; color: string; digits: number; period: ReportPeriod; from: string; to: string }): React.JSX.Element {
+function RankCard({ title, data, cumulativeData, unit, color, digits, period, from, to, exportScope }: { exportScope: string; title: string; data: RankedMetricPoint[]; cumulativeData: RankedMetricPoint[]; unit: string; color: string; digits: number; period: ReportPeriod; from: string; to: string }): React.JSX.Element {
   const [mode, setMode] = useState<'daily' | 'cumulative'>('daily')
   const labels = { daily: 'ค่าเฉลี่ยรายวัน', cumulative: 'ยอดสะสมทั้งหมด' }
   const points = mode === 'daily' ? data : cumulativeData
   const selectedUnit = mode === 'daily' ? `${unit}/day` : unit
   const subtitle = mode === 'daily' ? 'เรียงตามค่าเฉลี่ยต่อวันที่มีรายงานในช่วงเวลาที่เลือก · ไม่ใช่การประเมินสุขภาพ' : 'เรียงตามยอดสะสมจากวันที่มีรายงานในช่วงเวลาที่เลือก · ไม่ใช่การประเมินสุขภาพ'
-  return <Card title={title} subtitle={subtitle}>
+  return <Card title={title} subtitle={subtitle} action={<ExportDataButton title={title} filename={`${title}-${mode}-${exportScope}`} disabled={points.length === 0} getData={() => ({ headers: ['Wallet Address', 'Value', 'Unit'], rows: points.map((point) => [point.label, excelDecimal(point.value), selectedUnit]) })} />}>
     <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label={`${title} display mode`}>{(['daily', 'cumulative'] as const).map((value) => <button key={value} type="button" className={`btn min-h-11 text-xs transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-accent ${mode === value ? 'btn-primary' : 'btn-ghost'}`} aria-pressed={mode === value} onClick={() => setMode(value)}>{labels[value]}</button>)}</div>
     {points.length ? <RankedMetricBarChart data={points} unit={selectedUnit} color={color} ariaLabel={`${title} · ${labels[mode]}`} maximumFractionDigits={digits} drilldownPeriod={period} drilldownFrom={from} drilldownTo={to} /> : <Empty label="ไม่พบข้อมูลผู้ใช้งานในช่วงเวลานี้" />}
   </Card>
@@ -196,7 +198,7 @@ function reportedDays(row: UserSummaryRow, key: SummarySortKey): number {
   return key.includes('Steps') ? row.stepsDays : key.includes('Calories') ? row.caloriesDays : row.sleepDays
 }
 
-function UserSummaryTable({ rows, workspace, period, from, to }: { rows: UserSummaryRow[]; workspace: number | 'all'; period: ReportPeriod; from: string; to: string }): React.JSX.Element {
+function UserSummaryTable({ rows, workspace, period, from, to, exportScope }: { exportScope: string; rows: UserSummaryRow[]; workspace: number | 'all'; period: ReportPeriod; from: string; to: string }): React.JSX.Element {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [copyStatus, setCopyStatus] = useState('')
@@ -223,7 +225,10 @@ function UserSummaryTable({ rows, workspace, period, from, to }: { rows: UserSum
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / 25))
   const currentPage = Math.min(page, totalPages)
   const pageRows = sortedRows.slice((currentPage - 1) * 25, currentPage * 25)
-  return <Card className="mt-4" title="Wallet Summary" subtitle={`ผู้มีข้อมูล ${rows.length.toLocaleString()} คน · หนึ่งแถวต่อคน แม้เชื่อมหลายกระเป๋าก็ไม่นับกิจกรรมซ้ำ`} noPad>
+  return <Card className="mt-4" title="Wallet Summary" action={<ExportDataButton title="Wallet Summary" filename={`Wallet-Summary-${exportScope}`} disabled={sortedRows.length === 0} getData={() => ({
+    headers: [...summaryColumns.map((column) => column.label), 'Reported days Steps / Calories / Sleep'],
+    rows: sortedRows.map((row) => [...summaryColumns.map((column) => column.key === 'walletAddress' ? row.wallets.length ? row.wallets.join('\n') : row.walletAddress : reportedDays(row, column.key) === 0 ? null : excelDecimal(row[column.key])), `${row.stepsDays} / ${row.caloriesDays} / ${row.sleepDays}`]),
+  })} />} subtitle={`ผู้มีข้อมูล ${rows.length.toLocaleString()} คน · หนึ่งแถวต่อคน แม้เชื่อมหลายกระเป๋าก็ไม่นับกิจกรรมซ้ำ`} noPad>
     <div className="border-b border-default px-4 py-3"><label className="text-xs text-muted">Search Wallet Address<input type="search" className="input mt-1 max-w-xl font-mono" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} placeholder="0x…" /></label><span className="sr-only" aria-live="polite">{copyStatus}</span></div>
     {sortedRows.length === 0 ? <div className="py-16 text-center text-sm text-muted">ไม่พบข้อมูลผู้ใช้งานในช่วงเวลานี้</div> : <div className="max-h-[620px] overflow-auto thin-scroll" tabIndex={0} role="region" aria-label="Scrollable Wallet Summary">
       <table className="min-w-[1120px] w-full text-sm">
