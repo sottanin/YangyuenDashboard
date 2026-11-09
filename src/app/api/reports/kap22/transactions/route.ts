@@ -1,3 +1,4 @@
+import { TokenHistoryExportLimitError } from '@/lib/reporting/tokenHistoryExport'
 import { parseReportDateRange, ReportPeriodError } from '@/lib/reporting/reportPeriod'
 import { NextRequest, NextResponse } from 'next/server'
 import { getKap22Transactions } from '@/lib/reporting/kap22Analysis'
@@ -38,10 +39,13 @@ export async function GET(request: NextRequest) {
   }
   try {
     const range = await parseReportDateRange(request.nextUrl.searchParams)
-    const result = await getKap22Transactions(normalizeAddress(token), workspace, page, limit, search, range)
+    const exporting = request.nextUrl.searchParams.get('export') === '1'
+    const result = await getKap22Transactions(normalizeAddress(token), workspace, page, limit, search, range, exporting)
     if (!result) return NextResponse.json({ error: 'Token is not active in the selected scope' }, { status: 400 })
+    if (exporting) return NextResponse.json({ rows: result.rows })
     return NextResponse.json({ ...result, page, limit })
   } catch (error) {
+    if (error instanceof TokenHistoryExportLimitError) return NextResponse.json({ error: error.message }, { status: 422 })
     if (error instanceof ReportPeriodError) return NextResponse.json({ error: error.message }, { status: 400 })
     if (error instanceof WorkspaceNotFoundError) return NextResponse.json({ error: error.message }, { status: 404 })
     console.error('KAP-22 transactions error:', error)

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { canAccessChart, canAccessMenu, canAccessWorkspace, getCurrentAdmin } from '@/lib/auth/admin'
-import { getNftRedemptionTransactions, InvalidReportTokenError } from '@/lib/reporting/nftRedemptionsAnalysis'
+import { getNftRedemptionTransactions, InvalidReportTokenError, NftRedemptionExportLimitError } from '@/lib/reporting/nftRedemptionsAnalysis'
 import { parseReportDateRange, ReportPeriodError } from '@/lib/reporting/reportPeriod'
 import { isSelectableReportWorkspace, parseWorkspaceSelection } from '@/lib/reporting/workspaceScope'
 
@@ -18,9 +18,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const search = (params.get('search') ?? '').trim().slice(0, 128)
   try {
     const token = params.get('token') ?? ''
-    const data = await getNftRedemptionTransactions(workspace, page, limit, search, token, await parseReportDateRange(params))
+    const exporting = params.get('export') === '1'
+    const data = await getNftRedemptionTransactions(workspace, page, limit, search, token, await parseReportDateRange(params), exporting)
+    if (exporting) return NextResponse.json({ rows: data.rows })
     return NextResponse.json({ ...data, page, limit })
   } catch (error) {
+    if (error instanceof NftRedemptionExportLimitError) return NextResponse.json({ error: error.message }, { status: 422 })
     if (error instanceof ReportPeriodError || error instanceof InvalidReportTokenError) return NextResponse.json({ error: error.message }, { status: 400 })
     console.error('NFT redemption transactions error:', error)
     return NextResponse.json({ error: 'Unable to load NFT redemption transactions' }, { status: 500 })

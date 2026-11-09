@@ -1,3 +1,4 @@
+import { TOKEN_HISTORY_EXPORT_LIMIT, TokenHistoryExportLimitError } from './tokenHistoryExport'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { classifyFlow } from './classifyFlow'
@@ -238,11 +239,12 @@ export async function getKap20Summary(tokenAddress: string, workspace: number | 
   }
 }
 
-export async function getKap20Transactions(tokenAddress: string, workspace: number | 'all', page: number, limit: number, search = '', range?: ReportDateRange) {
+export async function getKap20Transactions(tokenAddress: string, workspace: number | 'all', page: number, limit: number, search = '', range?: ReportDateRange, exportAll = false) {
   const value = await context(workspace)
   if (!value || normalizeAddress(tokenAddress) !== normalizeAddress(value.token.address)) return null
   const where: Prisma.TransactionDetailWhereInput = { tokenAddress: { equals: value.token.address, mode: 'insensitive' }, timestamp: { gte: range?.start ?? value.historyStart, ...(range ? { lt: range.end } : {}) }, ...(search ? { OR: [{ txId: { contains: search, mode: 'insensitive' } }, { fromHash: { contains: search, mode: 'insensitive' } }, { toHash: { contains: search, mode: 'insensitive' } }] } : {}) }
-  const [items, total] = await Promise.all([prisma.transactionDetail.findMany({ where, orderBy: [{ timestamp: 'desc' }, { key: 'desc' }], skip: (page - 1) * limit, take: limit, include: { header: { select: { status: true } } } }), prisma.transactionDetail.count({ where })])
+  const [items, total] = await Promise.all([prisma.transactionDetail.findMany({ where, orderBy: [{ timestamp: 'desc' }, { key: 'desc' }, { id: 'desc' }], skip: exportAll ? 0 : (page - 1) * limit, take: exportAll ? TOKEN_HISTORY_EXPORT_LIMIT + 1 : limit, include: { header: { select: { status: true } } } }), prisma.transactionDetail.count({ where })])
+  if (exportAll && items.length > TOKEN_HISTORY_EXPORT_LIMIT) throw new TokenHistoryExportLimitError()
   const registry = await prisma.addressContract.findMany({ select: { normalizedAddress: true, name: true, role: true } })
   const names = new Map(registry.map((row) => [row.normalizedAddress, row.name])); const zero = new Set(value.zero); const markets = new Set(value.marketplaces)
   return { rows: items.map((item) => ({ id: item.id, key: item.key, txId: item.txId, timestamp: item.timestamp.toISOString(), type: zero.has(normalizeAddress(item.fromHash)) ? 'Mint' : markets.has(normalizeAddress(item.toHash)) ? 'Burn' : 'Transfer', flow: classifyFlow(item), status: item.header.status, tokenName: item.tokenName, tokenSymbol: item.tokenSymbol, fromHash: item.fromHash, fromName: names.get(normalizeAddress(item.fromHash)) ?? null, toHash: item.toHash, toName: names.get(normalizeAddress(item.toHash)) ?? null, value: item.value.toString() })), total, totalPages: Math.max(1, Math.ceil(total / limit)) }

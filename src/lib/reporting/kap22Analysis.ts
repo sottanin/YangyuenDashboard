@@ -1,3 +1,4 @@
+import { TOKEN_HISTORY_EXPORT_LIMIT, TokenHistoryExportLimitError } from './tokenHistoryExport'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { classifyFlow, type FlowClassification } from './classifyFlow'
@@ -353,7 +354,7 @@ export async function getKap22Summary(tokenAddress: string, workspaceSelection: 
   }
 }
 
-export async function getKap22Transactions(tokenAddress: string, workspaceSelection: number | 'all', page: number, limit: number, search = '', range?: ReportDateRange): Promise<{ rows: Kap22TransactionRow[]; total: number; totalPages: number } | null> {
+export async function getKap22Transactions(tokenAddress: string, workspaceSelection: number | 'all', page: number, limit: number, search = '', range?: ReportDateRange, exportAll = false): Promise<{ rows: Kap22TransactionRow[]; total: number; totalPages: number } | null> {
   const context = await reportContext(tokenAddress, workspaceSelection)
   if (!context) return null
   const where: Prisma.TransactionDetailWhereInput = {
@@ -371,9 +372,9 @@ export async function getKap22Transactions(tokenAddress: string, workspaceSelect
   const [items, total] = await Promise.all([
     prisma.transactionDetail.findMany({
       where,
-      orderBy: [{ timestamp: 'desc' }, { key: 'desc' }],
-      skip: (page - 1) * limit,
-      take: limit,
+      orderBy: [{ timestamp: 'desc' }, { key: 'desc' }, { id: 'desc' }],
+      skip: exportAll ? 0 : (page - 1) * limit,
+      take: exportAll ? TOKEN_HISTORY_EXPORT_LIMIT + 1 : limit,
       select: {
         id: true, key: true, txId: true, timestamp: true, fromHash: true, toHash: true,
         tokenAddress: true, tokenName: true, tokenSymbol: true, tokenType: true, value: true,
@@ -382,6 +383,7 @@ export async function getKap22Transactions(tokenAddress: string, workspaceSelect
     }),
     prisma.transactionDetail.count({ where }),
   ])
+  if (exportAll && items.length > TOKEN_HISTORY_EXPORT_LIMIT) throw new TokenHistoryExportLimitError()
   const normalizedAddresses = Array.from(new Set(items.flatMap((item) => [normalizeAddress(item.fromHash), normalizeAddress(item.toHash)])))
   const registeredAddresses = normalizedAddresses.length === 0 ? [] : await prisma.addressContract.findMany({
     // Display names in this report must come from the authoritative SYSTEM

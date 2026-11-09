@@ -1,6 +1,7 @@
 'use client'
 
 import { ExportDataButton } from '@/components/reports/ExportDataButton'
+import { overviewTimelineExport } from './overviewExportData'
 import { excelDecimal, type ExcelExportData } from '@/lib/reporting/exportExcel'
 import { ComparisonTag } from '@/components/ui/ComparisonTag'
 
@@ -44,6 +45,7 @@ export function OverviewDashboard(): React.JSX.Element {
   const hasVisibleContent = canViewKpis || canViewMonthly || canViewHistory
   const { selected, loading: workspaceLoading } = useWorkspace()
   const [report, setReport] = useState<Report | null>(null)
+  const [loadedReportKey, setLoadedReportKey] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reload, setReload] = useState(0)
@@ -63,6 +65,8 @@ export function OverviewDashboard(): React.JSX.Element {
   const [today, setToday] = useState('')
   const requestId = useRef(0)
   const customError = period === 'custom' ? (!customFrom || !customTo ? 'กรุณาเลือกวันเริ่มต้นและวันสิ้นสุด' : customFrom > customTo ? 'วันเริ่มต้นต้องไม่เกินวันสิ้นสุด' : customTo > today ? 'วันสิ้นสุดต้องไม่เกินวันนี้' : customFrom < historyStart ? 'From date cannot be before the business history start.' : '') : ''
+  const reportKey = JSON.stringify([selected.id, selectedToken, period, customFrom, customTo, page, search, reload])
+  const timelineExportReady = !workspaceLoading && !tokensLoading && !loading && !error && !tokensError && !customError && tokenWorkspace === String(selected.id) && !!selectedToken && loadedReportKey === reportKey
   const loadTokens = useCallback(async (signal?: AbortSignal): Promise<void> => {
     setTokensLoading(true); setTokensError('')
     try {
@@ -91,9 +95,9 @@ export function OverviewDashboard(): React.JSX.Element {
     const currentRequest = ++requestId.current
     queueMicrotask(() => { if (!controller.signal.aborted) { setLoading(true); setError(''); setReport(null) } })
     const query = new URLSearchParams({ workspace: String(selected.id), token: selectedToken, period, page: String(page) }); if (period === 'custom') { query.set('from', customFrom); query.set('to', customTo) }; if (search) query.set('search', search)
-    fetch(`/api/reports/overview?${query}`, { signal: controller.signal }).then(async (response) => { const body: unknown = await response.json(); if (!response.ok) throw new Error(body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Unable to load overview'); return body as Report }).then((body) => { if (!controller.signal.aborted && currentRequest === requestId.current) setReport(body) }).catch((reason: unknown) => { if (!controller.signal.aborted && currentRequest === requestId.current) { setReport(null); setError(reason instanceof Error ? reason.message : 'Unable to load overview') } }).finally(() => { if (!controller.signal.aborted && currentRequest === requestId.current) setLoading(false) })
+    fetch(`/api/reports/overview?${query}`, { signal: controller.signal }).then(async (response) => { const body: unknown = await response.json(); if (!response.ok) throw new Error(body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Unable to load overview'); return body as Report }).then((body) => { if (!controller.signal.aborted && currentRequest === requestId.current) { setReport(body); setLoadedReportKey(reportKey) } }).catch((reason: unknown) => { if (!controller.signal.aborted && currentRequest === requestId.current) { setReport(null); setError(reason instanceof Error ? reason.message : 'Unable to load overview') } }).finally(() => { if (!controller.signal.aborted && currentRequest === requestId.current) setLoading(false) })
     return () => controller.abort()
-  }, [customError, customFrom, customTo, hasVisibleContent, page, period, reload, search, selected.id, selectedToken, tokenWorkspace, workspaceLoading])
+  }, [customError, customFrom, customTo, hasVisibleContent, page, period, reload, reportKey, search, selected.id, selectedToken, tokenWorkspace, workspaceLoading])
   return <div className="min-w-0 max-w-full"><PageHeader title="Overview" subtitle={`ภาพรวมกิจกรรมบนบล็อกเชนของ Workspace · ${selected.name}`} actions={hasVisibleContent ? <ReportFilters idPrefix="overview" tokens={tokens} token={selectedToken} period={period} customFrom={customFrom} customTo={customTo} disabled={tokensLoading} minDate={historyStart} maxDate={today} onTokenChange={(value) => { setSelectedToken(value); setPage(1) }} onPeriodChange={(value) => { setPeriod(value); setPage(1) }} onCustomFromChange={(value) => { setCustomFrom(value); setPage(1) }} onCustomToChange={(value) => { setCustomTo(value); setPage(1) }} /> : undefined} />
     {tokensError ? <div className="mb-4"><ErrorCard message={tokensError} onRetry={() => void loadTokens()} /></div> : null}
     {customError ? <div className="mb-4" role="alert"><ErrorCard message={customError} /></div> : null}
@@ -109,7 +113,7 @@ export function OverviewDashboard(): React.JSX.Element {
         {canViewNftMint && <KpiTile label="Vouchers issued (Mint)" subLabel="จำนวน voucher ที่ออกให้ผู้ใช้ในช่วงวันที่เลือก" value={`${formatAmount(report.kpis.nftMint.value)} NFTs`} valueTrailing={<TokenAvatar src={report.kpis.nftMint.imageUrl} symbol="NFT" size="sm" />} change={report.kpis.nftMint.change} changeLabel={report.kpis.nftMint.changeLabel} icon="arrowUp" />}
         {canViewNftBurn && <KpiTile label="Vouchers used (Burn)" subLabel="จำนวน voucher ที่ใช้แล้วในช่วงวันที่เลือก" value={`${formatAmount(report.kpis.nftBurn.value)} NFTs`} valueTrailing={<TokenAvatar src={report.kpis.nftBurn.imageUrl} symbol="NFT" size="sm" />} change={report.kpis.nftBurn.change} changeLabel={report.kpis.nftBurn.changeLabel} icon="refresh" />}
       </section>}
-      {canViewMonthly && <Card className="mb-4" title="Total Transactions" subtitle="จำนวนธุรกรรมไม่ซ้ำตามช่วงวันที่เลือก ผลรวมตรงกับ KPI Total Transactions · วันหรือเดือนปัจจุบันอาจยังมีข้อมูลไม่ครบ"><TransactionTimelineChart monthly={report.timeline.monthly} daily={report.timeline.daily} granularity={granularity} onGranularityChange={setGranularity} height={300} /></Card>}
+      {canViewMonthly && <Card className="mb-4 [&>div:first-child]:flex-row [&>div:first-child]:items-start" title="Total Transactions" action={<ExportDataButton title="Total Transactions" filename={`Total-Transactions-${granularity}-workspace-${selected.id}-${selectedToken}-${report.period.from}-${report.period.to}`} disabled={!timelineExportReady || !report.timeline[granularity].length} getData={() => overviewTimelineExport(report.timeline, granularity)} />} subtitle="จำนวนธุรกรรมไม่ซ้ำตามช่วงวันที่เลือก ผลรวมตรงกับ KPI Total Transactions · วันหรือเดือนปัจจุบันอาจยังมีข้อมูลไม่ครบ"><TransactionTimelineChart monthly={report.timeline.monthly} daily={report.timeline.daily} granularity={granularity} onGranularityChange={setGranularity} height={300} /></Card>}
       {canViewPointTokenDistributed && <Card className="mb-4" title="Point tokens distributed" subtitle="จำนวนคะแนนที่แจกในช่วงวันที่เลือก แสดงแยกแต่ละโทเคนเพื่อให้เปรียบเทียบได้ชัดเจน ไม่นำยอดต่างโทเคนมารวมกัน"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{report.kpis.kap22.map((metric) => <div key={metric.symbol} className="rounded-xl border border-default p-3"><div className="flex items-center gap-2 text-xs text-muted"><TokenAvatar src={metric.imageUrl} symbol={metric.symbol} size="sm" />{metric.symbol}</div><div className="mt-2 break-words font-mono text-lg font-semibold text-default">{formatAmount(metric.value)} {metric.symbol}</div><div className="mt-1"><ComparisonTag change={metric.change} label={metric.changeLabel} /></div></div>)}</div></Card>}
       {(canViewTotalGasFee || canViewRedemptionFee) && <section aria-label="Operational costs" className="mb-4 grid gap-4 sm:grid-cols-2">
         {canViewTotalGasFee && <KpiTile label="Total Gas Fee" subLabel="ค่าธรรมเนียมเครือข่ายรวมของธุรกรรมในช่วงวันที่เลือก" value={`${formatKub(report.kpis.totalGasFee.value)} KUB`} valueTrailing={<TokenAvatar src="/assets/tokens/kub.png" symbol="KUB" size="sm" />} icon="zap" />}

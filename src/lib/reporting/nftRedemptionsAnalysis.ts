@@ -18,6 +18,8 @@ interface NftTransactionSqlRow {
 interface CountRow { total: bigint }
 
 export class InvalidReportTokenError extends Error {}
+export class NftRedemptionExportLimitError extends Error {}
+export const NFT_HISTORY_EXPORT_LIMIT = 50_000
 
 function nftArtworkUrl(workspace: number | 'all', tokenAddress: string, tokenId: string): string {
   const params = new URLSearchParams({ workspace: String(workspace), contract: tokenAddress, tokenId })
@@ -274,6 +276,7 @@ export async function getNftRedemptionTransactions(
   search = '',
   tokenAddress: string,
   range: ReportDateRange,
+  exportAll = false,
 ) {
   const context = await reportContext(workspace, tokenAddress)
   const pattern = `%${search.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`
@@ -282,18 +285,22 @@ export async function getNftRedemptionTransactions(
     LOWER(detail."tokenAddress")=ANY(${addressArray(context.nftAddresses)})
     AND detail."timestamp">=${range.start} AND detail."timestamp"<${range.end}
     ${nftTokenAssociation(context, 'detail')} ${searchSql}`
-  const offset = (page - 1) * limit
+  const queryLimit = exportAll ? NFT_HISTORY_EXPORT_LIMIT + 1 : limit
+  const offset = exportAll ? 0 : (page - 1) * limit
   const [items, countRows, addressRegistry, tokenRegistry] = await Promise.all([
     prisma.$queryRaw<NftTransactionSqlRow[]>(Prisma.sql`
       SELECT detail.id,detail.key,detail."txId" tx_id,detail."timestamp",detail."fromHash" from_hash,detail."toHash" to_hash,
         LOWER(detail."tokenAddress") token_address,detail."tokenName" token_name,detail."tokenSymbol" token_symbol,detail."tokenId" token_id,header.status
       FROM "RedemptionTransactionDetail" detail JOIN "RedemptionTransactionHeader" header USING("txId")
-      WHERE ${scopeSql} ORDER BY detail."timestamp" DESC,detail.key DESC OFFSET ${offset} LIMIT ${limit}
+      WHERE ${scopeSql} ORDER BY detail."timestamp" DESC,detail.key DESC,detail.id DESC OFFSET ${offset} LIMIT ${queryLimit}
     `),
     prisma.$queryRaw<CountRow[]>(Prisma.sql`SELECT COUNT(*)::bigint total FROM "RedemptionTransactionDetail" detail WHERE ${scopeSql}`),
     prisma.addressContract.findMany({ select: { normalizedAddress: true, name: true } }),
     prisma.tokenContract.findMany({ select: { normalizedAddress: true, name: true } }),
   ])
+  if (exportAll && items.length > NFT_HISTORY_EXPORT_LIMIT) {
+    throw new NftRedemptionExportLimitError('More than 50,000 events match. Narrow the date range or search before exporting.')
+  }
   const total = Number(countRows[0]?.total ?? BigInt(0))
   const names = new Map<string, string>([
     ...addressRegistry.map((entry) => [entry.normalizedAddress, entry.name] as const),

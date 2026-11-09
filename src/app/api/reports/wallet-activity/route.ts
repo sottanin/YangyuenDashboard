@@ -9,6 +9,9 @@ import { walletBalanceFieldForTokenAddress, walletExpiredBalanceFieldForTokenAdd
 
 const ZERO = '0x0000000000000000000000000000000000000000'
 const LIMIT = 20
+const EXPORT_LIMIT = 50_000
+const exportPermissions = { transaction: 'transaction-history', redemption: 'redemption-history', fitivity: 'fitivity-history' } as const
+type ExportKind = keyof typeof exportPermissions
 const MAX_PAGE = 10_000
 const MAX_MONTHLY_CHART_MONTHS = 120
 const MAX_MAPPING_FAN_OUT = 100
@@ -33,6 +36,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     if (!canAccessMenu(admin, 'wallets')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const visible = (key: string): boolean => canAccessChart(admin, `wallet-activity.${key}`)
+    const exportInput = request.nextUrl.searchParams.get('export')
+    if (exportInput !== null && !Object.hasOwn(exportPermissions, exportInput)) return NextResponse.json({ error: 'Invalid export kind' }, { status: 400 })
+    const exportKind = exportInput as ExportKind | null
+    if (exportKind && !visible(exportPermissions[exportKind])) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const canViewFitivity = ['steps-trend', 'calories-trend', 'sleep-trend', 'fitivity-history'].some(visible)
     const chartKeys = ['total-transactions', 'token-activity', 'point-token-activity', 'nft-activity', 'token-balance', 'point-token-balance', 'steps-trend', 'calories-trend', 'sleep-trend', 'transaction-history', 'redemption-history', 'fitivity-history']
     if (!chartKeys.some(visible)) return NextResponse.json({ error: 'No Wallet Activity charts are assigned' }, { status: 403 })
@@ -58,6 +65,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (selectedUserInput && (!canViewFitivity || !userIds.some((value) => value.toLowerCase() === normalizedSelectedUser))) return NextResponse.json({ error: 'Selected User ID is not linked to this identity' }, { status: 400 })
     const resolvedUserIds = !canViewFitivity ? [] : selectedUserInput ? userIds.filter((value) => value.toLowerCase() === normalizedSelectedUser) : userIds.length === 1 ? userIds : []
     const normalizedUserIds = resolvedUserIds.map((value) => value.toLowerCase())
+    if (exportKind === 'fitivity' && normalizedUserIds.length === 0) return NextResponse.json({ error: 'Select a linked Fitivity user before exporting' }, { status: 400 })
     const walletSet = array(normalizedWallets)
     const userSet = array(normalizedUserIds)
     const requestedTxPage = page(request.nextUrl.searchParams.get('txPage'))
@@ -73,7 +81,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       prisma.addressContract.findMany({ where: { active: true, OR: [{ workspaceId: workspace }, { workspaceId: null }, { workspace: { name: { equals: 'SYSTEM', mode: 'insensitive' } } }, { role: 'MARKETPLACE', aggregateAcrossWorkspaces: true }] }, select: { normalizedAddress: true, name: true, role: true } }),
       prisma.tokenContract.findMany({ select: { normalizedAddress: true } }),
       prisma.addressContract.findMany({ select: { normalizedAddress: true } }),
-      (visible('token-balance') || visible('point-token-balance') || visible('token-activity') || visible('point-token-activity')) ? prisma.$queryRaw<Wallet[]>(Prisma.sql`SELECT DISTINCT ON (LOWER("walletId")) * FROM "Wallet" WHERE LOWER("walletId")=ANY(${walletSet}) ORDER BY LOWER("walletId"),"timestamp" DESC NULLS LAST,id DESC`) : Promise.resolve([] as Wallet[]),
+      !exportKind && (visible('token-balance') || visible('point-token-balance') || visible('token-activity') || visible('point-token-activity')) ? prisma.$queryRaw<Wallet[]>(Prisma.sql`SELECT DISTINCT ON (LOWER("walletId")) * FROM "Wallet" WHERE LOWER("walletId")=ANY(${walletSet}) ORDER BY LOWER("walletId"),"timestamp" DESC NULLS LAST,id DESC`) : Promise.resolve([] as Wallet[]),
     ])
     const range = await parseReportDateRange(request.nextUrl.searchParams)
     const start = range.start; const end = range.end
@@ -91,6 +99,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const txPattern = like(txSearch); const redemptionPattern = like(redemptionSearch)
     const txFilter = txSearch ? Prisma.sql`(d."txId" ILIKE ${txPattern} ESCAPE '\\' OR d."fromHash" ILIKE ${txPattern} ESCAPE '\\' OR d."toHash" ILIKE ${txPattern} ESCAPE '\\' OR d."tokenName" ILIKE ${txPattern} ESCAPE '\\' OR d."tokenSymbol" ILIKE ${txPattern} ESCAPE '\\')` : Prisma.sql`TRUE`
     const redemptionFilter = redemptionSearch ? Prisma.sql`(d."txId" ILIKE ${redemptionPattern} ESCAPE '\\' OR d."fromHash" ILIKE ${redemptionPattern} ESCAPE '\\' OR d."toHash" ILIKE ${redemptionPattern} ESCAPE '\\' OR d."tokenName" ILIKE ${redemptionPattern} ESCAPE '\\' OR d."tokenSymbol" ILIKE ${redemptionPattern} ESCAPE '\\' OR d."tokenId" ILIKE ${redemptionPattern} ESCAPE '\\')` : Prisma.sql`TRUE`
+
+    const loadTokenHistory = (offset: number, take: number): Promise<HistoryRow[]> => prisma.$queryRaw<HistoryRow[]>(Prisma.sql`SELECT 'kap-'||d.key key,d."txId" tx_id,d."timestamp",d."fromHash" from_hash,d."toHash" to_hash,LOWER(d."tokenAddress") token_address,d."tokenName" token_name,d."tokenSymbol" token_symbol,COALESCE(t.standard,d."txType") standard,CASE WHEN LOWER(d."fromHash")=${ZERO} THEN 'Mint' WHEN LOWER(d."toHash")=${ZERO} THEN 'Burn' ELSE 'Transfer' END type,d.value::text value,NULL::text token_id,NULL::numeric token_value,h.status FROM "TransactionDetail" d JOIN "TransactionHeader" h USING("txId") LEFT JOIN "TokenContract" t ON t."normalizedAddress"=LOWER(d."tokenAddress") AND t."workspaceId"=${workspace} WHERE d."timestamp">=${start} AND d."timestamp"<${end} AND (LOWER(d."tokenAddress")=ANY(${kap20}) OR LOWER(d."tokenAddress")=ANY(${kap22})) AND (LOWER(d."fromHash")=ANY(${walletSet}) OR LOWER(d."toHash")=ANY(${walletSet})) AND ${txFilter} ORDER BY d."timestamp" DESC,d.key DESC,d.id DESC OFFSET ${offset} LIMIT ${take}`)
+    const loadNftHistory = (offset: number, take: number): Promise<HistoryRow[]> => prisma.$queryRaw<HistoryRow[]>(Prisma.sql`SELECT 'nft-'||d.key key,d."txId" tx_id,d."timestamp",d."fromHash" from_hash,d."toHash" to_hash,LOWER(d."tokenAddress") token_address,COALESCE(NULLIF(n.name,''),d."tokenName") token_name,d."tokenSymbol" token_symbol,'KAP-721' standard,'Mint' type,'1' value,d."tokenId" token_id,n."tokenValue" token_value,h.status FROM "RedemptionTransactionDetail" d JOIN "RedemptionTransactionHeader" h USING("txId") LEFT JOIN "NFTInstance" n ON n."normalizedTokenAddress"=LOWER(d."tokenAddress") AND n.id=d."tokenId" WHERE d."timestamp">=${start} AND d."timestamp"<${end} AND LOWER(d."tokenAddress")=ANY(${kap721}) AND LOWER(d."fromHash")=${ZERO} AND LOWER(d."toHash")=ANY(${walletSet}) AND d."tokenId" IS NOT NULL AND ${redemptionFilter} ORDER BY d."timestamp" DESC,d.key DESC,d.id DESC OFFSET ${offset} LIMIT ${take}`)
+    const loadFitivityHistory = (offset: number, take: number): Promise<FitivityHistoryRow[]> => prisma.$queryRaw<FitivityHistoryRow[]>(Prisma.sql`SELECT id,date,"metricType" metric_type,"totalValue" total_value,unit FROM "FitivityData" WHERE "workspaceId"=${workspace} AND LOWER("userId")=ANY(${userSet}) AND date>=${range.from}::date AND date<=${range.to}::date ORDER BY date DESC,"metricType",id OFFSET ${offset} LIMIT ${take}`)
+    if (exportKind) {
+      const rows = exportKind === 'transaction' ? await loadTokenHistory(0, EXPORT_LIMIT + 1) : exportKind === 'redemption' ? await loadNftHistory(0, EXPORT_LIMIT + 1) : await loadFitivityHistory(0, EXPORT_LIMIT + 1)
+      if (rows.length > EXPORT_LIMIT) return NextResponse.json({ error: 'More than 50,000 records match. Narrow the date range or search before exporting.' }, { status: 422 })
+      if (exportKind === 'fitivity') return NextResponse.json({ timezone: config.reportingTimezone, rows: (rows as FitivityHistoryRow[]).map((row) => ({ id: row.id, date: row.date.toISOString().slice(0, 10), walletAddresses, metricType: row.metric_type, value: row.total_value.toString(), unit: row.unit })) })
+      const names = new Map(addresses.map((item) => [item.normalizedAddress.toLowerCase(), item.name]))
+      return NextResponse.json({ timezone: config.reportingTimezone, rows: (rows as HistoryRow[]).map((row) => ({ key: row.key, txId: row.tx_id, timestamp: row.timestamp.toISOString(), fromHash: row.from_hash, toHash: row.to_hash, fromName: names.get(row.from_hash.toLowerCase()) ?? null, toName: names.get(row.to_hash.toLowerCase()) ?? null, tokenName: row.token_name, tokenSymbol: row.token_symbol, standard: row.standard, type: row.type, value: row.value, tokenId: row.token_id, tokenValue: row.token_value?.toString() ?? null, status: row.status })) })
+    }
 
     const [totalRows, monthlyRows, tokenRows, pointRows, nftRows, txCounts, redemptionCounts] = await Promise.all([
       visible('total-transactions') ? prisma.$queryRaw<TotalRow[]>(Prisma.sql`WITH h AS (SELECT x."txId" FROM "TransactionHeader" x WHERE x."timestamp">=${start} AND x."timestamp"<${end} AND EXISTS(SELECT 1 FROM "TransactionDetail" d WHERE d."txId"=x."txId" AND LOWER(d."tokenAddress")=ANY(${scoped}) AND (LOWER(d."fromHash")=ANY(${walletSet}) OR LOWER(d."toHash")=ANY(${walletSet}))) UNION ALL SELECT x."txId" FROM "RedemptionTransactionHeader" x WHERE x."timestamp">=${start} AND x."timestamp"<${end} AND EXISTS(SELECT 1 FROM "RedemptionTransactionDetail" d WHERE d."txId"=x."txId" AND LOWER(d."tokenAddress")=ANY(${scoped}) AND (LOWER(d."fromHash")=ANY(${walletSet}) OR LOWER(d."toHash")=ANY(${walletSet})))) SELECT COUNT(DISTINCT LOWER("txId"))::bigint total FROM h`) : Promise.resolve([] as TotalRow[]),
@@ -120,9 +139,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ])
     const fitivityTotal = Number(fitivityCounts[0]?.count ?? 0); const fitivityPages = Math.min(MAX_PAGE, Math.max(1, Math.ceil(fitivityTotal / LIMIT))); const fitivityPage = Math.min(requestedFitivityPage, fitivityPages)
     const [txRows, redemptionRows, fitivityRows] = await Promise.all([
-      visible('transaction-history') ? prisma.$queryRaw<HistoryRow[]>(Prisma.sql`SELECT 'kap-'||d.key key,d."txId" tx_id,d."timestamp",d."fromHash" from_hash,d."toHash" to_hash,LOWER(d."tokenAddress") token_address,d."tokenName" token_name,d."tokenSymbol" token_symbol,COALESCE(t.standard,d."txType") standard,CASE WHEN LOWER(d."fromHash")=${ZERO} THEN 'Mint' WHEN LOWER(d."toHash")=${ZERO} THEN 'Burn' ELSE 'Transfer' END type,d.value::text value,NULL::text token_id,NULL::numeric token_value,h.status FROM "TransactionDetail" d JOIN "TransactionHeader" h USING("txId") LEFT JOIN "TokenContract" t ON t."normalizedAddress"=LOWER(d."tokenAddress") AND t."workspaceId"=${workspace} WHERE d."timestamp">=${start} AND d."timestamp"<${end} AND (LOWER(d."tokenAddress")=ANY(${kap20}) OR LOWER(d."tokenAddress")=ANY(${kap22})) AND (LOWER(d."fromHash")=ANY(${walletSet}) OR LOWER(d."toHash")=ANY(${walletSet})) AND ${txFilter} ORDER BY d."timestamp" DESC,d.key DESC OFFSET ${(txPage - 1) * LIMIT} LIMIT ${LIMIT}`) : Promise.resolve([] as HistoryRow[]),
-      visible('redemption-history') ? prisma.$queryRaw<HistoryRow[]>(Prisma.sql`SELECT 'nft-'||d.key key,d."txId" tx_id,d."timestamp",d."fromHash" from_hash,d."toHash" to_hash,LOWER(d."tokenAddress") token_address,COALESCE(NULLIF(n.name,''),d."tokenName") token_name,d."tokenSymbol" token_symbol,'KAP-721' standard,'Mint' type,'1' value,d."tokenId" token_id,n."tokenValue" token_value,h.status FROM "RedemptionTransactionDetail" d JOIN "RedemptionTransactionHeader" h USING("txId") LEFT JOIN "NFTInstance" n ON n."normalizedTokenAddress"=LOWER(d."tokenAddress") AND n.id=d."tokenId" WHERE d."timestamp">=${start} AND d."timestamp"<${end} AND LOWER(d."tokenAddress")=ANY(${kap721}) AND LOWER(d."fromHash")=${ZERO} AND LOWER(d."toHash")=ANY(${walletSet}) AND d."tokenId" IS NOT NULL AND ${redemptionFilter} ORDER BY d."timestamp" DESC,d.key DESC OFFSET ${(redemptionPage - 1) * LIMIT} LIMIT ${LIMIT}`) : Promise.resolve([] as HistoryRow[]),
-      normalizedUserIds.length && visible('fitivity-history') ? prisma.$queryRaw<FitivityHistoryRow[]>(Prisma.sql`SELECT id,date,"metricType" metric_type,"totalValue" total_value,unit FROM "FitivityData" WHERE "workspaceId"=${workspace} AND LOWER("userId")=ANY(${userSet}) AND date>=${range.from}::date AND date<=${range.to}::date ORDER BY date DESC,"metricType",id OFFSET ${(fitivityPage - 1) * LIMIT} LIMIT ${LIMIT}`) : Promise.resolve([] as FitivityHistoryRow[]),
+      visible('transaction-history') ? loadTokenHistory((txPage - 1) * LIMIT, LIMIT) : Promise.resolve([] as HistoryRow[]),
+      visible('redemption-history') ? loadNftHistory((redemptionPage - 1) * LIMIT, LIMIT) : Promise.resolve([] as HistoryRow[]),
+      normalizedUserIds.length && visible('fitivity-history') ? loadFitivityHistory((fitivityPage - 1) * LIMIT, LIMIT) : Promise.resolve([] as FitivityHistoryRow[]),
     ])
     const tokenTotals = new Map(tokenRows.map((row) => [row.metric, row.total])); const pointTotals = new Map(pointRows.map((row) => [`${row.metric}:${row.token_address}`, row.total])); const nftTotals = new Map(nftRows.map((row) => [row.metric, row.count])); const names = new Map(addresses.map((item) => [item.normalizedAddress.toLowerCase(), item.name])); const byAddress = new Map(tokens.map((token) => [token.normalizedAddress.toLowerCase(), token]))
     const image = (token: typeof tokens[number] | undefined): string | null => token?.imageKey ? `/api/reports/wallet-activity/token-image/${token.id}?workspace=${workspace}` : null

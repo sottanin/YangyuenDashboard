@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { usePathname } from 'next/navigation'
+import { ExportDataButton } from '@/components/reports/ExportDataButton'
+import { tokenCountExport, tokenAmountExport, tokenRankingExport, tokenHistoryExport } from './exportData'
+import type { ExcelExportData } from '@/lib/reporting/exportExcel'
 import { Card } from '@/components/ui/Card'
 import { ErrorCard } from '@/components/ui/ErrorCard'
 import { Icon } from '@/components/ui/Icon'
@@ -121,6 +124,10 @@ export default function Kap22AnalysisPage() {
   const { selected, loading: workspaceLoading } = useWorkspace()
   const [tokens, setTokens] = useState<TokenOption[]>([])
   const [selectedToken, setSelectedToken] = useState('')
+  const [tokenScope, setTokenScope] = useState('')
+  const [summaryScope, setSummaryScope] = useState('')
+  const [rankingScope, setRankingScope] = useState('')
+  const [historyScope, setHistoryScope] = useState('')
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
   const [transactions, setTransactions] = useState<TransactionsResponse | null>(null)
   const [topUsers, setTopUsers] = useState<TopUsersResponse | null>(null)
@@ -155,6 +162,8 @@ export default function Kap22AnalysisPage() {
   const heatmapRequest = useRef(0)
   const annotationRequest = useRef(0)
   const workspace = String(selected.id)
+  const scopeKey = `${apiBase}|${workspace}|${selectedToken}|${period}|${customFrom}|${customTo}`
+  const historyKey = `${scopeKey}|${search}|${page}`
   const annotationSelection = useRef({ token: '', workspace: '' })
   const annotationSelectionGeneration = useRef(0)
 
@@ -165,8 +174,9 @@ export default function Kap22AnalysisPage() {
     try {
       const response = await fetch(`${apiBase}/tokens?workspace=${encodeURIComponent(workspace)}`, { signal })
       const data = await responseJson<{ tokens: TokenOption[] }>(response)
-      if (requestId !== tokenRequest.current) return
+      if (signal?.aborted || requestId !== tokenRequest.current) return
       setTokens(data.tokens)
+      setTokenScope(`${apiBase}|${workspace}`)
       const preferred = data.tokens.find((token) => token.symbol.toUpperCase() === (isKap20 ? 'ICCYYN' : 'FIT'))
       setSelectedToken((current) => data.tokens.some((token) => token.address.toLowerCase() === current.toLowerCase()) ? current : (preferred ?? data.tokens[0])?.address ?? '')
       setPage(1)
@@ -189,7 +199,7 @@ export default function Kap22AnalysisPage() {
       const query = new URLSearchParams({ token, workspace, period }); if (period === 'custom') { query.set('from', customFrom); query.set('to', customTo) }
       const response = await fetch(`${apiBase}/summary?${query}`, { signal })
       const data = await responseJson<SummaryResponse>(response)
-      if (requestId === summaryRequest.current) setSummary(data)
+      if (!signal?.aborted && requestId === summaryRequest.current) { setSummary(data); setSummaryScope(`${apiBase}|${workspace}|${token}|${period}|${customFrom}|${customTo}`) }
     } catch (error) {
       if (signal?.aborted || requestId !== summaryRequest.current) return
       setSummaryError(error instanceof Error ? error.message : 'Unable to load summary')
@@ -207,7 +217,7 @@ export default function Kap22AnalysisPage() {
       if (requestedSearch) query.set('search', requestedSearch)
       const response = await fetch(`${apiBase}/transactions?${query}`, { signal })
       const data = await responseJson<TransactionsResponse>(response)
-      if (requestId === tableRequest.current) setTransactions(data)
+      if (!signal?.aborted && requestId === tableRequest.current) { setTransactions(data); setHistoryScope(`${apiBase}|${workspace}|${token}|${period}|${customFrom}|${customTo}|${requestedSearch}|${requestedPage}`) }
     } catch (error) {
       if (signal?.aborted || requestId !== tableRequest.current) return
       setTransactions(null)
@@ -226,7 +236,7 @@ export default function Kap22AnalysisPage() {
       const query = new URLSearchParams({ token, workspace, period }); if (period === 'custom') { query.set('from', customFrom); query.set('to', customTo) }
       const response = await fetch(`${apiBase}/top-users?${query}`, { signal })
       const data = await responseJson<TopUsersResponse>(response)
-      if (requestId === topUsersRequest.current) setTopUsers(data)
+      if (!signal?.aborted && requestId === topUsersRequest.current) { setTopUsers(data); setRankingScope(`${apiBase}|${workspace}|${token}|${period}|${customFrom}|${customTo}`) }
     } catch (error) {
       if (signal?.aborted || requestId !== topUsersRequest.current) return
       setTopUsersError(error instanceof Error ? error.message : 'Unable to load user rankings')
@@ -319,6 +329,12 @@ export default function Kap22AnalysisPage() {
   }, [canViewDailyCharts, selectedToken, loadAnnotations, workspace])
 
   const customRangeInvalid = period === 'custom' && (!customFrom || !customTo || customFrom > customTo)
+  const exportScopeReady = !workspaceLoading && !tokensLoading && !tokensError && tokenScope === `${apiBase}|${workspace}` && !!selectedToken && !customRangeInvalid
+  const summaryExportReady = exportScopeReady && !summaryLoading && !summaryError && summaryScope === scopeKey
+  const rankingExportReady = exportScopeReady && !topUsersLoading && !topUsersError && rankingScope === scopeKey
+  const pendingSearch = (searchInput.trim().length >= 2 ? searchInput.trim() : '') !== search
+  const historyExportReady = exportScopeReady && !tableLoading && !tableError && historyScope === historyKey && !pendingSearch
+  const exportFilename = `${reportType}-workspace-${workspace}-${selectedToken}-${period}${period === 'custom' ? `-${customFrom}-${customTo}` : ''}`
   const filteredDaily = customRangeInvalid ? [] : summary?.daily ?? []
   const heatmapFrom = customRangeInvalid ? null : summary?.period?.from ?? null
   const heatmapTo = customRangeInvalid ? null : summary?.period?.to ?? null
@@ -344,6 +360,14 @@ export default function Kap22AnalysisPage() {
     annotations: annotationMap.get(point.date),
   }))
   const selectedOption = tokens.find((token) => token.address.toLowerCase() === selectedToken.toLowerCase())
+
+  async function exportHistory(): Promise<ExcelExportData> {
+    const query = new URLSearchParams({ token: selectedToken, workspace, period, export: '1' })
+    if (period === 'custom') { query.set('from', customFrom); query.set('to', customTo) }
+    if (search) query.set('search', search)
+    const data = await responseJson<{ rows: TransactionRow[] }>(await fetch(`${apiBase}/transactions?${query}`))
+    return tokenHistoryExport(data.rows, summary?.timezone ?? 'Asia/Bangkok')
+  }
 
   function openAnnotation(annotation: ChartAnnotation | null = null): void {
     setEditingAnnotation(annotation); setAnnotationDate(annotation?.date ?? summary?.daily.at(-1)?.date ?? ''); setAnnotationEvent(annotation?.event ?? ''); setAnnotationError(''); setAnnotationModal(true)
@@ -446,10 +470,10 @@ export default function Kap22AnalysisPage() {
       </div> : null}
 
       <div className="mb-4 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
-        {canViewDailyCount && <div><Card className="min-w-0 max-w-full" title={isKap20 ? 'User-destination transfer transactions' : 'Distribution transactions'} subtitle={isKap20 ? 'จำนวนธุรกรรมที่โอนโทเคนให้ผู้ใช้ในแต่ละวัน โดยไม่นับการโอนไปยังกระเป๋าของระบบ' : 'จำนวนธุรกรรมที่แจกคะแนนจากกองกลางให้ผู้ใช้ในแต่ละวัน'}>
+        {canViewDailyCount && <div><Card className="min-w-0 max-w-full [&>div:first-child]:flex-row [&>div:first-child]:items-start" action={<ExportDataButton title={isKap20 ? 'User-destination transfer transactions' : 'Distribution transactions'} filename={`transfer-transactions-${exportFilename}`} disabled={!summaryExportReady || !filteredDaily.length} getData={() => tokenCountExport(filteredDaily)} />} title={isKap20 ? 'User-destination transfer transactions' : 'Distribution transactions'} subtitle={isKap20 ? 'จำนวนธุรกรรมที่โอนโทเคนให้ผู้ใช้ในแต่ละวัน โดยไม่นับการโอนไปยังกระเป๋าของระบบ' : 'จำนวนธุรกรรมที่แจกคะแนนจากกองกลางให้ผู้ใช้ในแต่ละวัน'}>
           {customRangeInvalid ? <div className="flex h-[300px] items-center justify-center text-sm text-red-400">Select a valid From and To date.</div> : summaryLoading ? <div className="h-[300px] shimmer rounded-xl" /> : transactionChartData.length === 0 ? <div className="flex h-[300px] items-center justify-center text-sm text-muted">ยังไม่พบประวัติการโอนในช่วงนี้</div> : <SingleLineChart data={transactionChartData} label="Total transactions" tooltipUnit="transactions" averageUnit="transactions" valueKind="count" fractionDigits={2} averageLabelPrefix="" color="var(--success)" />}
         </Card></div>}
-        {canViewDailyVolume && <div><Card className="min-w-0 max-w-full" title={isKap20 ? 'Tokens transferred to user destinations' : 'Points distributed'} subtitle="จำนวนโทเคนที่ผู้ใช้ได้รับในแต่ละวัน จากรายการกลุ่มเดียวกับกราฟจำนวนธุรกรรมและตามช่วงวันที่เลือก">
+        {canViewDailyVolume && <div><Card className="min-w-0 max-w-full [&>div:first-child]:flex-row [&>div:first-child]:items-start" action={<ExportDataButton title={isKap20 ? 'Tokens transferred to user destinations' : 'Points distributed'} filename={`transfer-amounts-${exportFilename}`} disabled={!summaryExportReady || !filteredDaily.length} getData={() => tokenAmountExport(filteredDaily, summary?.token.symbol ?? '')} />} title={isKap20 ? 'Tokens transferred to user destinations' : 'Points distributed'} subtitle="จำนวนโทเคนที่ผู้ใช้ได้รับในแต่ละวัน จากรายการกลุ่มเดียวกับกราฟจำนวนธุรกรรมและตามช่วงวันที่เลือก">
           {customRangeInvalid ? <div className="flex h-[300px] items-center justify-center text-sm text-red-400">Select a valid From and To date.</div> : summaryLoading ? <div className="h-[300px] shimmer rounded-xl" /> : amountChartData.length === 0 ? <div className="flex h-[300px] items-center justify-center text-sm text-muted">ยังไม่พบประวัติการโอนในช่วงนี้</div> : <SingleLineChart data={amountChartData} label={`Total amount (${summary?.token.symbol ?? 'KAP-22'})`} tooltipUnit={`amounts (${summary?.token.symbol ?? 'KAP-22'})`} averageUnit={summary?.token.symbol ?? 'KAP-22'} valueKind="amount" fractionDigits={2} averageLabelPrefix="" color="var(--danger)" />}
         </Card></div>}
       </div>
@@ -463,15 +487,15 @@ export default function Kap22AnalysisPage() {
       </Card> : null}
 
       <div className="mb-4 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
-        {canViewTopRecipients && <Card className="min-w-0 max-w-full" title="Top 10 Token Recipients" subtitle="แสดงผู้ใช้ 10 อันดับที่ได้รับโทเคนมากที่สุดในช่วงวันที่เลือก">
+        {canViewTopRecipients && <Card className="min-w-0 max-w-full [&>div:first-child]:flex-row [&>div:first-child]:items-start" action={<ExportDataButton title="Top 10 Token Recipients" filename={`top-recipients-${exportFilename}`} disabled={!rankingExportReady || !topUsers?.topReceived.length} getData={() => tokenRankingExport(topUsers?.topReceived ?? [], 'Received', topUsers?.token.symbol ?? '')} />} title="Top 10 Token Recipients" subtitle="แสดงผู้ใช้ 10 อันดับที่ได้รับโทเคนมากที่สุดในช่วงวันที่เลือก">
           {topUsersError ? <ErrorCard message={topUsersError} onRetry={() => selectedToken && void loadTopUsers(selectedToken)} /> : topUsersLoading || !topUsers ? <div className="h-[336px] shimmer rounded-xl" /> : topUsers.topReceived.length === 0 ? <div className="flex h-[336px] items-center justify-center text-center text-sm text-muted">ยังไม่พบรายการที่ผู้ใช้ได้รับโทเคน</div> : <HorizontalBarChart drilldownPeriod={period} drilldownFrom={customFrom} drilldownTo={customTo} data={topUsers.topReceived} symbol={topUsers.token.symbol} color="var(--accent)" ariaLabel={`Top 10 users by total ${topUsers.token.symbol} received`} />}
         </Card>}
-        {canViewTopHolders && <Card className="min-w-0 max-w-full" title="Top 10 Token Holders by Balance" subtitle="แสดงผู้ใช้ 10 อันดับที่มียอดโทเคนคงเหลือมากที่สุดจากข้อมูลล่าสุด โดยไม่เปลี่ยนตามช่วงวันที่เลือก">
+        {canViewTopHolders && <Card className="min-w-0 max-w-full [&>div:first-child]:flex-row [&>div:first-child]:items-start" action={<ExportDataButton title="Top 10 Token Holders by Balance" filename={`top-holders-${exportFilename}`} disabled={!rankingExportReady || !topUsers?.topBalances.length} getData={() => tokenRankingExport(topUsers?.topBalances ?? [], 'Balance', topUsers?.token.symbol ?? '')} />} title="Top 10 Token Holders by Balance" subtitle="แสดงผู้ใช้ 10 อันดับที่มียอดโทเคนคงเหลือมากที่สุดจากข้อมูลล่าสุด โดยไม่เปลี่ยนตามช่วงวันที่เลือก">
           {topUsersError ? <ErrorCard message={topUsersError} onRetry={() => selectedToken && void loadTopUsers(selectedToken)} /> : topUsersLoading || !topUsers ? <div className="h-[336px] shimmer rounded-xl" /> : topUsers.topBalances.length === 0 ? <div className="flex h-[336px] items-center justify-center text-center text-sm text-muted">ยังไม่พบยอดคงเหลือที่มากกว่าศูนย์จากข้อมูลล่าสุด</div> : <HorizontalBarChart drilldownPeriod={period} drilldownFrom={customFrom} drilldownTo={customTo} data={topUsers.topBalances} symbol={topUsers.token.symbol} color="var(--success)" ariaLabel={`Top 10 users by latest synchronized on-chain ${topUsers.token.symbol} balance`} rankMarker="wealth" />}
         </Card>}
       </div>
 
-      {canViewHistory && <Card className="min-w-0 max-w-full" title="Transaction Events" subtitle="ดูรายละเอียดรายการโอนในช่วงวันที่เลือก ธุรกรรมหนึ่งอาจมีหลายรายการ จึงอาจพบรหัสธุรกรรมเดียวกันหลายแถว" noPad>
+      {canViewHistory && <Card className="min-w-0 max-w-full [&>div:first-child]:flex-row [&>div:first-child]:items-start" action={<ExportDataButton title="Transaction Events" filename={`transaction-events-${exportFilename}`} disabled={!historyExportReady || !transactions?.rows.length} getData={exportHistory} />} title="Transaction Events" subtitle="ดูรายละเอียดรายการโอนในช่วงวันที่เลือก ธุรกรรมหนึ่งอาจมีหลายรายการ จึงอาจพบรหัสธุรกรรมเดียวกันหลายแถว" noPad>
         <div className="border-b border-default p-4 sm:p-5">
           <label htmlFor="kap22-transaction-search" className="sr-only">Search {reportLabel} transactions</label>
           <div className="relative max-w-xl">

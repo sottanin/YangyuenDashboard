@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BarChart } from '@/components/charts/BarChart'
+import { VoucherStatusDistribution } from './VoucherStatusDistribution'
+import { ExportDataButton } from '@/components/reports/ExportDataButton'
+import { nftHistoryExport, nftRankingExport, nftTrendExport } from './exportData'
 import { ReportScope } from '@/components/reports/ReportScope'
 import { NftRedemptionBarChart, type NftRedemptionBarPoint } from '@/components/charts/NftRedemptionBarChart'
 import { Card } from '@/components/ui/Card'
@@ -80,6 +83,9 @@ export default function NftRedemptionsPage(): React.JSX.Element {
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
   const [topNfts, setTopNfts] = useState<NftRedemptionBarPoint[]>([])
   const [topBurns, setTopBurns] = useState<NftRedemptionBarPoint[]>([])
+  const [summaryKey, setSummaryKey] = useState('')
+  const [chartKey, setChartKey] = useState('')
+  const [tableKey, setTableKey] = useState('')
   const [transactions, setTransactions] = useState<TransactionsResponse | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(true)
   const [chartLoading, setChartLoading] = useState(true)
@@ -108,6 +114,13 @@ export default function NftRedemptionsPage(): React.JSX.Element {
     return params
   }, [customFrom, customTo, period, selectedToken, workspace])
 
+  const reportKey = `${reportParams()}&issued=${canViewNftMint}&used=${canViewNftBurn}&topIssued=${canViewTopRedemptions}&topUsed=${canViewTopBurns}`
+  const currentTableKey = `${reportParams()}&search=${encodeURIComponent(search)}&page=${page}`
+  const exportScopeReady = !workspaceLoading && !tokensLoading && tokenWorkspace === workspace && !!selectedToken && !customError && !tokensError
+  const summaryExportReady = exportScopeReady && !summaryLoading && !summaryError && summaryKey === reportKey
+  const rankingExportReady = exportScopeReady && !chartLoading && !chartError && chartKey === reportKey
+  const historyExportReady = exportScopeReady && !tableLoading && !tableError && tableKey === currentTableKey && searchInput.trim() === search
+
   const loadTokens = useCallback(async (signal?: AbortSignal): Promise<void> => {
     setTokensLoading(true); setTokensError('')
     try {
@@ -125,11 +138,11 @@ export default function NftRedemptionsPage(): React.JSX.Element {
     setSummaryLoading(true); setSummaryError('')
     try {
       const data = await readResponse<SummaryResponse>(await fetch(`/api/reports/nft-redemptions/summary?${reportParams()}`, { signal }))
-      if (id === requestIds.current.summary) setSummary(data)
+      if (!signal?.aborted && id === requestIds.current.summary) { setSummary(data); setSummaryKey(reportKey) }
     } catch (error) {
       if (!signal?.aborted && id === requestIds.current.summary) { setSummary(null); setSummaryError(error instanceof Error ? error.message : 'Unable to load summary') }
     } finally { if (id === requestIds.current.summary) setSummaryLoading(false) }
-  }, [reportParams])
+  }, [reportKey, reportParams])
 
   const loadChart = useCallback(async (signal?: AbortSignal): Promise<void> => {
     const id = ++requestIds.current.chart
@@ -139,11 +152,11 @@ export default function NftRedemptionsPage(): React.JSX.Element {
         canViewTopRedemptions ? readResponse<{ rows: NftRedemptionBarPoint[] }>(await fetch(`/api/reports/nft-redemptions/top-nfts?${reportParams()}`, { signal })) : Promise.resolve({ rows: [] }),
         canViewTopBurns ? readResponse<{ rows: NftRedemptionBarPoint[] }>(await fetch(`/api/reports/nft-redemptions/top-burns?${reportParams()}`, { signal })) : Promise.resolve({ rows: [] }),
       ])
-      if (id === requestIds.current.chart) { setTopNfts(redemptions.rows); setTopBurns(burns.rows) }
+      if (!signal?.aborted && id === requestIds.current.chart) { setTopNfts(redemptions.rows); setTopBurns(burns.rows); setChartKey(reportKey) }
     } catch (error) {
       if (!signal?.aborted && id === requestIds.current.chart) { setTopNfts([]); setTopBurns([]); setChartError(error instanceof Error ? error.message : 'Unable to load NFT rankings') }
     } finally { if (id === requestIds.current.chart) setChartLoading(false) }
-  }, [canViewTopBurns, canViewTopRedemptions, reportParams])
+  }, [canViewTopBurns, canViewTopRedemptions, reportKey, reportParams])
 
   const loadTransactions = useCallback(async (requestedPage: number, requestedSearch: string, signal?: AbortSignal): Promise<void> => {
     const id = ++requestIds.current.table
@@ -152,11 +165,18 @@ export default function NftRedemptionsPage(): React.JSX.Element {
     if (requestedSearch) params.set('search', requestedSearch)
     try {
       const data = await readResponse<TransactionsResponse>(await fetch(`/api/reports/nft-redemptions/transactions?${params}`, { signal }))
-      if (id === requestIds.current.table) setTransactions(data)
+      if (!signal?.aborted && id === requestIds.current.table) { setTransactions(data); setTableKey(`${reportParams()}&search=${encodeURIComponent(requestedSearch)}&page=${requestedPage}`) }
     } catch (error) {
       if (!signal?.aborted && id === requestIds.current.table) { setTransactions(null); setTableError(error instanceof Error ? error.message : 'Unable to load transaction history') }
     } finally { if (id === requestIds.current.table) setTableLoading(false) }
   }, [reportParams])
+
+  const exportHistory = async () => {
+    const params = reportParams(); params.set('export', '1')
+    if (search) params.set('search', search)
+    const data = await readResponse<{ rows: TransactionRow[] }>(await fetch(`/api/reports/nft-redemptions/transactions?${params}`))
+    return nftHistoryExport(data.rows, summary?.timezone ?? 'Asia/Bangkok')
+  }
 
   useEffect(() => {
     if (workspaceLoading || workspace === 'all') return
@@ -202,19 +222,19 @@ export default function NftRedemptionsPage(): React.JSX.Element {
     </section>}</div>}
 
     {!summaryLoading && !summaryError && summary && !customError && (canViewNftMint || canViewNftBurn) ? <>
-      {canViewNftMint && canViewNftBurn && summary.currentInventory ? <Card className="mb-4" title="Current observed outstanding vouchers" subtitle="ดูสถานะล่าสุดของ voucher แต่ละใบจากประวัติที่มี ไม่ใช่การนำยอดออกลบยอดใช้เฉพาะช่วงวันที่เลือก">{summary.dataThrough ? <div className="grid gap-4 sm:grid-cols-3"><div className="flex min-w-0 items-start gap-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-accent" aria-hidden="true"><Icon name="user" size={18} /></span><div><p className="text-xs text-muted">ยังอยู่กับผู้ใช้</p><p className="mt-1 text-2xl font-semibold text-default">{summary.currentInventory.active.toLocaleString()}</p></div></div><div className="flex min-w-0 items-start gap-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-success" aria-hidden="true"><Icon name="check" size={18} /></span><div><p className="text-xs text-muted">ใช้แล้ว</p><p className="mt-1 text-2xl font-semibold text-default">{summary.currentInventory.used.toLocaleString()}</p></div></div><div className="flex min-w-0 items-start gap-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted" aria-hidden="true"><Icon name="info" size={18} /></span><div><p className="text-xs text-muted">ยังไม่ทราบสถานะหรืออยู่กับระบบ</p><p className="mt-1 text-2xl font-semibold text-default">{summary.currentInventory.unknown.toLocaleString()}</p></div></div></div>:<p className="text-sm text-muted">ยังสรุปจำนวนคงเหลือไม่ได้ เพราะยังไม่มีประวัติของ voucher ที่ใช้ตรวจสอบสถานะ</p>}<p className="mt-3 text-xs text-muted">สรุปจากประวัติที่ระบบมี หากข้อมูลยังไม่ครบ อาจมีบางใบที่ยังไม่ถูกนับ จำนวนนี้ยังไม่รวมการตรวจวันหมดอายุหรือเงื่อนไขการใช้สิทธิ์</p></Card>:null}
-      <Card className="mb-4" title="Vouchers issued and used over time" subtitle="เปรียบเทียบจำนวน voucher ที่ออกและใช้ในแต่ละวัน ใบที่ใช้ในช่วงนี้อาจได้รับมาก่อนช่วงที่เลือก จึงไม่ควรนำสองยอดนี้มาหารเป็นอัตราการใช้ วันที่แสดงศูนย์หมายถึงยังไม่พบรายการในข้อมูลที่มี">{summary.trend.length ? <BarChart data={summary.trend} keys={[...(canViewNftMint?[{key:'issued',label:'Issued',color:'var(--success)'}]:[]),...(canViewNftBurn?[{key:'used',label:'Used',color:'var(--accent)'}]:[])]} tooltipValueFormat="integer" showLegend height={280}/>:<div className="flex h-60 items-center justify-center text-sm text-muted">ยังไม่พบการใช้งานในช่วงนี้</div>}</Card>
+      {canViewNftMint && canViewNftBurn && summary.currentInventory ? <Card className="mb-4" title="Current observed outstanding vouchers" subtitle="ดูสถานะล่าสุดของ voucher แต่ละใบจากประวัติที่มี ไม่ใช่การนำยอดออกลบยอดใช้เฉพาะช่วงวันที่เลือก">{summary.dataThrough ? <VoucherStatusDistribution active={summary.currentInventory.active} used={summary.currentInventory.used} />:<p className="text-sm text-muted">ยังสรุปจำนวนคงเหลือไม่ได้ เพราะยังไม่มีประวัติของ voucher ที่ใช้ตรวจสอบสถานะ</p>}<p className="mt-3 text-xs text-muted">สรุปจากประวัติที่ระบบมี หากข้อมูลยังไม่ครบ อาจมีบางใบที่ยังไม่ถูกนับ จำนวนนี้ยังไม่รวมการตรวจวันหมดอายุหรือเงื่อนไขการใช้สิทธิ์</p></Card>:null}
+      <Card className="mb-4 [&>div:first-child]:flex-row [&>div:first-child]:items-start" action={<ExportDataButton title="Vouchers issued and used over time" filename="nft-vouchers-issued-used-over-time" disabled={!summaryExportReady || !summary.trend.length} getData={() => nftTrendExport(summary.trend, canViewNftMint, canViewNftBurn)} />} title="Vouchers issued and used over time" subtitle="เปรียบเทียบจำนวน voucher ที่ออกและใช้ในแต่ละวัน ใบที่ใช้ในช่วงนี้อาจได้รับมาก่อนช่วงที่เลือก จึงไม่ควรนำสองยอดนี้มาหารเป็นอัตราการใช้ วันที่แสดงศูนย์หมายถึงยังไม่พบรายการในข้อมูลที่มี">{summary.trend.length ? <BarChart data={summary.trend} keys={[...(canViewNftMint?[{key:'issued',label:'Issued',color:'var(--success)'}]:[]),...(canViewNftBurn?[{key:'used',label:'Used',color:'var(--accent)'}]:[])]} tooltipValueFormat="integer" showLegend height={280}/>:<div className="flex h-60 items-center justify-center text-sm text-muted">ยังไม่พบการใช้งานในช่วงนี้</div>}</Card>
     </>:null}
     {canViewRankings && tokens.length > 0 && !customError && !tokensError && <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-2" aria-label="NFT rankings">
-      {canViewTopRedemptions && <Card title="Top 10 vouchers issued" subtitle="จัดอันดับ NFT 10 รายการที่ถูกแลกมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
+      {canViewTopRedemptions && <Card className="[&>div:first-child]:flex-row [&>div:first-child]:items-start" action={<ExportDataButton title="Top 10 vouchers issued" filename="nft-top-10-vouchers-issued" disabled={!rankingExportReady || !topNfts.length} getData={() => nftRankingExport(topNfts, 'Issued')} />} title="Top 10 vouchers issued" subtitle="จัดอันดับ NFT 10 รายการที่ถูกแลกมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
         {chartError ? <ErrorCard message={chartError} onRetry={() => void loadChart()} /> : chartLoading ? <div className="h-[340px] shimmer rounded-xl" /> : topNfts.length === 0 ? <div className="flex h-[280px] items-center justify-center text-sm text-muted">ยังไม่พบรายการออก voucher ในช่วงนี้</div> : <NftRedemptionBarChart data={topNfts} />}
       </Card>}
-      {canViewTopBurns && <Card title="Top 10 vouchers used" subtitle="จัดอันดับ NFT 10 รายการที่ถูกใช้งานมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
+      {canViewTopBurns && <Card className="[&>div:first-child]:flex-row [&>div:first-child]:items-start" action={<ExportDataButton title="Top 10 vouchers used" filename="nft-top-10-vouchers-used" disabled={!rankingExportReady || !topBurns.length} getData={() => nftRankingExport(topBurns, 'Used')} />} title="Top 10 vouchers used" subtitle="จัดอันดับ NFT 10 รายการที่ถูกใช้งานมากที่สุด โดยจัดกลุ่มจากชื่อ NFT">
         {chartError ? <ErrorCard message={chartError} onRetry={() => void loadChart()} /> : chartLoading ? <div className="h-[340px] shimmer rounded-xl" /> : topBurns.length === 0 ? <div className="flex h-[280px] items-center justify-center text-sm text-muted">ยังไม่พบรายการใช้ voucher ในช่วงนี้</div> : <NftRedemptionBarChart data={topBurns} variant="burn" />}
       </Card>}
     </section>}
 
-    {canViewHistory && tokens.length > 0 && !customError && !tokensError && <Card title="NFT Event History" subtitle="ตารางแสดงธุรกรรม NFT ทั้งหมด พร้อม Token ID ผู้ส่ง ผู้รับ และสถานะธุรกรรม" noPad>
+    {canViewHistory && tokens.length > 0 && !customError && !tokensError && <Card className="[&>div:first-child]:flex-row [&>div:first-child]:items-start" action={<ExportDataButton title="NFT Event History" filename="nft-event-history" disabled={!historyExportReady || !transactions?.rows.length} getData={exportHistory} />} title="NFT Event History" subtitle="ตารางแสดงธุรกรรม NFT ทั้งหมด พร้อม Token ID ผู้ส่ง ผู้รับ และสถานะธุรกรรม" noPad>
       <div className="border-b border-default p-4 sm:p-5">
         <label htmlFor="nft-redemption-search" className="sr-only">Search NFT redemption transactions</label>
         <div className="relative max-w-xl">
