@@ -11,7 +11,7 @@ const ZERO = '0x0000000000000000000000000000000000000000'
 const LIMIT = 20
 interface TimelinePoint { label: string; value: number }
 interface SummaryRow { daily: TimelinePoint[]; total_transactions: bigint; total_fee: Prisma.Decimal; today_transactions: bigint; yesterday_transactions: bigint; today_fee: Prisma.Decimal; yesterday_fee: Prisma.Decimal }
-interface AmountRow { metric: string; token_address: string | null; total: Prisma.Decimal; today: Prisma.Decimal; yesterday: Prisma.Decimal }
+interface AmountRow { metric: string; token_address: string | null; total: Prisma.Decimal; today: Prisma.Decimal; yesterday: Prisma.Decimal; recipient_wallets: bigint }
 interface NftRow { metric: string; total: bigint; today: bigint; yesterday: bigint }
 interface HistoryRow { key: string; tx_id: string; timestamp: Date; from_hash: string; to_hash: string; token_address: string; token_name: string; token_symbol: string; standard: string; type: string; value: string; token_id: string | null; status: string | null }
 interface CountRow { count: bigint }
@@ -116,7 +116,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           UNION ALL SELECT 'kap20Redeemed',NULL::text,e.* FROM e WHERE token_address=ANY(${kap20}) AND NOT(from_hash=ANY(${registered})) AND to_hash=ANY(${markets})
           UNION ALL SELECT 'kap20Fee',NULL::text,e.* FROM e WHERE token_address=ANY(${kap20}) AND from_hash=ANY(${markets}) AND to_hash=ANY(${marketFees})
           UNION ALL SELECT 'kap22',token_address,e.* FROM e WHERE token_address=ANY(${kap22}) AND from_hash=ANY(${pools}) AND NOT(to_hash=ANY(${registered}))
-        ) SELECT metric,metric_token token_address,COALESCE(SUM(value),0) total,
+        ) SELECT metric,metric_token token_address,COALESCE(SUM(value),0) total,COUNT(DISTINCT to_hash) FILTER (WHERE value>0)::bigint recipient_wallets,
           COALESCE(SUM(value) FILTER(WHERE ${day}=(CURRENT_TIMESTAMP AT TIME ZONE ${TIME_ZONE})::date),0) today,
           COALESCE(SUM(value) FILTER(WHERE ${day}=(CURRENT_TIMESTAMP AT TIME ZONE ${TIME_ZONE})::date-1),0) yesterday FROM m GROUP BY metric,metric_token`),
       prisma.$queryRaw<NftRow[]>(Prisma.sql`
@@ -203,7 +203,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       kap20Distributed: canAccessChart(admin, 'overview.token-distributed') ? { ...amountMetric('kap20Distributed'), imageUrl: tokenImage(kap20Token), symbol: kap20Token?.symbol ?? 'KAP-20' } : hiddenMetric,
       kap20Redeemed: canAccessChart(admin, 'overview.token-redeemed') ? { ...netRedeemed, imageUrl: tokenImage(kap20Token), symbol: kap20Token?.symbol ?? 'KAP-20' } : hiddenMetric,
       redemptionFee: canAccessChart(admin, 'overview.redemption-fee') ? { ...redemptionFee, imageUrl: tokenImage(kap20Token), symbol: kap20Token?.symbol ?? 'KAP-20' } : hiddenMetric,
-      kap22: canAccessChart(admin, 'overview.point-token-distributed') ? orderedKap22.map((t) => { const r = kap22Amounts.get(t.normalizedAddress.toLowerCase()); return { symbol: t.symbol || t.name, imageUrl: tokenImage(t), value: dec(r?.total).toString(), ...comparison(dec(r?.total).toString(), dec(previousPoints.get(t.normalizedAddress.toLowerCase())).toString()) } }) : [],
+      kap22: canAccessChart(admin, 'overview.point-token-distributed') ? orderedKap22.map((t) => { const r = kap22Amounts.get(t.normalizedAddress.toLowerCase()); return { name: t.name, symbol: t.symbol || t.name, recipientWallets: Number(r?.recipient_wallets ?? 0), imageUrl: tokenImage(t), value: dec(r?.total).toString(), ...comparison(dec(r?.total).toString(), dec(previousPoints.get(t.normalizedAddress.toLowerCase())).toString()) } }) : [],
       nftMint: canAccessChart(admin, 'overview.nft-mint') ? { ...nftMetric('mint'), imageUrl: tokenImage(nftToken) } : hiddenMetric,
       nftBurn: canAccessChart(admin, 'overview.nft-burn') ? { ...nftMetric('burn'), imageUrl: tokenImage(nftToken) } : hiddenMetric,
     }, timeline: { monthly: showMonthly ? monthly : [], daily: showMonthly ? daily : [] },
