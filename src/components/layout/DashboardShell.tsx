@@ -22,9 +22,9 @@ interface AdminProfile {
 
 const PAGE_LABELS: Record<string, string> = {
   '/dashboard': 'Overview',
-  '/dashboard/tokens': 'Tokens (KAP-20)',
-  '/dashboard/point-tokens': 'Point Tokens (KAP-22)',
-  '/dashboard/nft-redemptions': 'NFT Redemptions (KAP-721)',
+  '/dashboard/tokens': 'Tokens',
+  '/dashboard/point-tokens': 'Point Tokens',
+  '/dashboard/nft-redemptions': 'NFT Redemptions',
   '/dashboard/nft-vouchers': 'NFT Vouchers',
   '/dashboard/roles': 'Roles',
   '/dashboard/wallet-activity': 'Wallet Activity',

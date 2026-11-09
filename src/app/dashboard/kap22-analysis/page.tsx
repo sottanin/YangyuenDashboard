@@ -90,7 +90,7 @@ export default function Kap22AnalysisPage() {
   const reportType = pathname === '/dashboard/tokens' || pathname === '/dashboard/kap20-analysis' ? 'kap20' : 'kap22'
   const isKap20 = reportType === 'kap20'
   const reportLabel = isKap20 ? 'KAP-20' : 'KAP-22'
-  const reportTitle = isKap20 ? 'Tokens (KAP-20)' : 'Point Tokens (KAP-22)'
+  const reportTitle = isKap20 ? 'Tokens' : 'Point Tokens'
   const apiBase = `/api/reports/${reportType}`
   const { canViewChart } = useChartPermissions()
   const chartKey = (suffix: string): string => `${reportType}.${suffix}`

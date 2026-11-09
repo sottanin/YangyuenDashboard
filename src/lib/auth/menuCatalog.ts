@@ -1,8 +1,8 @@
 export const MENU_CATALOG = [
   { key: 'overview', label: 'Overview', section: 'Workspace', href: '/dashboard', icon: 'home' },
-  { key: 'kap20-analysis', label: 'Tokens (KAP-20)', section: 'Workspace', href: '/dashboard/tokens', icon: 'coin' },
-  { key: 'kap22-analysis', label: 'Point Tokens (KAP-22)', section: 'Workspace', href: '/dashboard/point-tokens', icon: 'coins' },
-  { key: 'redemptions', label: 'NFT Redemptions (KAP-721)', section: 'Workspace', href: '/dashboard/nft-redemptions', icon: 'nft' },
+  { key: 'kap20-analysis', label: 'Tokens', section: 'Workspace', href: '/dashboard/tokens', icon: 'coin' },
+  { key: 'kap22-analysis', label: 'Point Tokens', section: 'Workspace', href: '/dashboard/point-tokens', icon: 'coins' },
+  { key: 'redemptions', label: 'NFT Redemptions', section: 'Workspace', href: '/dashboard/nft-redemptions', icon: 'nft' },
   { key: 'nft-vouchers', label: 'NFT Vouchers', section: 'Workspace', href: '/dashboard/nft-vouchers', icon: 'ticket' },
   { key: 'wallets', label: 'Wallet Activity', section: 'Workspace', href: '/dashboard/wallet-activity', icon: 'wallet' },
   { key: 'fitivity-overview', label: 'Fitivity', section: 'Workspace', href: '/dashboard/fitivity-overview', icon: 'pulse' },

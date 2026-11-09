@@ -1,10 +1,17 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Inter, Noto_Sans_Thai } from 'next/font/google'
 import './globals.css'
 
 const inter = Inter({
   subsets: ['latin'],
   variable: '--font-inter',
+  adjustFontFallback: false,
+  display: 'swap',
+})
+
+const notoSansThai = Noto_Sans_Thai({
+  subsets: ['thai'],
+  variable: '--font-noto-sans-thai',
   display: 'swap',
 })
 
@@ -20,7 +27,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} h-full`} suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${notoSansThai.variable} h-full`} suppressHydrationWarning>
       <body className="min-h-full">{children}</body>
     </html>
   )

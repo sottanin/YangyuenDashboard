@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
+@theme inline {
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-ui);
+}
+
 /* Nexus Admin — Modern Glassmorphism Dashboard */
 
 :root {
+  --font-ui: var(--font-inter), var(--font-noto-sans-thai), sans-serif;
   --bg: 250 250 255;
   --surface: 255 255 255;
   --surface-2: 250 250 252;
@@ -48,12 +54,16 @@
 html, body {
   margin: 0;
   padding: 0;
-  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  font-family: var(--font-ui);
   font-feature-settings: 'cv11', 'ss01', 'ss03';
   background: rgb(var(--bg));
   color: rgb(var(--text));
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+.font-mono {
+  font-variant-numeric: tabular-nums;
 }
 
 body {
