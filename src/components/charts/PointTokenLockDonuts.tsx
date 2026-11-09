@@ -87,7 +87,6 @@ export function PointTokenLockDonuts({ data, balanceSymbol }: { data: PointToken
   const [textColor, mutedColor] = useResolvedColors(['var(--text)', 'var(--text-muted)'])
   if (!data.length) return <div className="flex min-h-48 items-center justify-center text-sm text-muted">ยังไม่มี Point Token ในเวิร์กสเปซนี้</div>
   return <div>
-    <p className="mb-4 text-xs leading-relaxed text-muted">เกจแสดงสัดส่วนโทเคนที่ส่งออก เทียบกับจำนวนที่รับเข้าทั้งหมดของแต่ละ Point Token สีแสดงช่วงเปอร์เซ็นต์ ส่วนยอดสำรองล่าสุดแสดงแยกไว้ใต้เกจ</p>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{data.map((token) => {
       const percentage = getOutgoingShare(token.incomingTransfers, token.outgoingTransfers)
       const needle = gaugePoint(Math.min(100, Math.max(0, percentage ?? 0)), 58)
