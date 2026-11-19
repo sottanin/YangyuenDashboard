@@ -7,6 +7,7 @@ import { ErrorCard } from '@/components/ui/ErrorCard'
 import { Icon } from '@/components/ui/Icon'
 import { KpiTile } from '@/components/ui/KpiTile'
 import { PeriodFilter } from '@/components/reports/PeriodFilter'
+import { ExportDataButton } from '@/components/reports/ExportDataButton'
 import { ReportScope } from '@/components/reports/ReportScope'
 import type { ReportPeriod } from '@/lib/reporting/reportPeriod'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -200,6 +201,8 @@ export default function NftVouchersPage(): React.JSX.Element {
   const canViewVouchers = canViewChart('nft-vouchers.voucher-list')
   const [report, setReport] = useState<ReportResponse | null>(null)
   const [page, setPage] = useState(1)
+  const [showAllActivity, setShowAllActivity] = useState(false)
+  const [loadedActivityScope, setLoadedActivityScope] = useState('')
   const [period, setPeriod] = useState<ReportPeriod>('all')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
@@ -222,6 +225,7 @@ export default function NftVouchersPage(): React.JSX.Element {
       if (!response.ok) throw new Error(result.error ?? 'Unable to load NFT vouchers')
       if (signal?.aborted) return
       setReport(result)
+      setLoadedActivityScope(JSON.stringify([selected.id, page, period, customFrom, customTo, status, search]))
       if (page > result.totalPages) setPage(result.totalPages)
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === 'AbortError') return
@@ -241,6 +245,10 @@ export default function NftVouchersPage(): React.JSX.Element {
     return () => controller.abort()
   }, [canViewActivity, canViewVouchers, load, workspaceLoading])
 
+  const activityRows = report ? showAllActivity ? report.activity : report.activity.slice(0, 10) : []
+  const activityScope = JSON.stringify([selected.id, page, period, customFrom, customTo, status, search])
+  const canExportActivity = !loading && !workspaceLoading && !error && loadedActivityScope === activityScope && searchInput.trim() === search && activityRows.length > 0
+
   if (!canViewActivity && !canViewVouchers) return <><PageHeader title="NFT Vouchers" subtitle="ติดตามการซื้อ การใช้งาน และสถานะปัจจุบันของ NFT Voucher" /><section role="status" className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-default px-6 py-12 text-center"><h2 className="text-base font-semibold text-default">ยังไม่มีรายงานให้แสดง</h2><p className="mt-2 max-w-md text-sm text-muted">คุณเปิดเมนูนี้ได้ แต่ยังไม่ได้รับสิทธิ์ดูกราฟหรือข้อมูล</p></section></>
 
   return <div className="min-w-0 max-w-full">
@@ -250,9 +258,9 @@ export default function NftVouchersPage(): React.JSX.Element {
     {!loading && report?.inventory && canViewVouchers ? <><section className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-label="Filtered voucher inventory"><KpiTile label="Issued instances" subLabel="จำนวน voucher ที่ออกในช่วงวันที่เลือกและตรงกับตัวกรอง" value={report.inventory.total.toLocaleString()} /><KpiTile label="Currently available" subLabel="voucher ในกลุ่มที่เลือกที่ยังไม่พบการใช้และยังอยู่กับผู้ถือ" value={report.inventory.available.toLocaleString()} /><KpiTile label="Currently used" subLabel="voucher ในกลุ่มที่เลือกซึ่งใช้แล้ว ตามสถานะล่าสุด" value={report.inventory.used.toLocaleString()} /></section><p className="mb-4 text-xs text-muted">voucher ที่มีข้อมูลรับและใช้ครบ {report.inventory.pairedUsed.toLocaleString()} ใบ · ระยะเวลาเฉลี่ยตั้งแต่ได้รับจนถึงใช้ {report.inventory.averageDaysToUse ?? 'ยังไม่มีข้อมูล'} วัน คำนวณเฉพาะใบที่ใช้แล้วและมีข้อมูลครบ ใบที่เพิ่งได้รับอาจยังมีเวลานำไปใช้น้อยกว่า จึงไม่ควรนำมาสรุปเป็นอัตราการใช้ในระยะเวลาเดียวกัน</p></> : null}
     {error ? <div className="mb-4"><ErrorCard message={error} onRetry={() => void load()} /></div> : null}
 
-    {!error && canViewActivity ? <Card className="mb-4" title="NFT Voucher Comparison · Top 10" subtitle="เปรียบเทียบจำนวนที่ออกในชุดวันที่เลือก และการใช้ที่จับคู่กับ voucher ชุดเดียวกัน">
-      {loading ? <div className="h-[360px] shimmer rounded-xl" /> : !report || report.activity.length === 0 ? <div className="flex h-[300px] flex-col items-center justify-center text-center"><Icon name="ticket" size={32} className="mb-3 text-faint" /><p className="text-sm font-medium text-default">ยังไม่พบข้อมูลการรับหรือใช้ voucher</p><p className="mt-1 text-xs text-muted">เมื่อมีการอัปเดตประวัติการรับและใช้ voucher แล้ว ข้อมูลจะแสดงที่นี่</p></div> : <VoucherActivityChart data={report.activity} />}
-      {report?.activity.length ? <div className="sr-only"><table><caption>NFT Voucher Activity data</caption><thead><tr><th scope="col">NFT name</th><th scope="col">Purchase</th><th scope="col">Redeem</th></tr></thead><tbody>{report.activity.map((point) => <tr key={point.name}><th scope="row">{point.name}</th><td>{point.purchase}</td><td>{point.redeem}</td></tr>)}</tbody></table></div> : null}
+    {!error && canViewActivity ? <Card className="mb-4" title={`NFT Voucher Comparison · ${showAllActivity ? 'All' : 'Top 10'}`} action={<ExportDataButton title="NFT Voucher Comparison" filename={`NFT-Voucher-Comparison-${showAllActivity ? 'all' : 'top-10'}-workspace-${selected.id}-${report?.period.from ?? ''}-${report?.period.to ?? ''}`} disabled={!canExportActivity} getData={() => ({ headers: ['NFT name', 'Issued', 'Used'], rows: activityRows.map((point) => [point.name, point.purchase, point.redeem]) })} />} subtitle="เปรียบเทียบจำนวนที่ออกในชุดวันที่เลือก และการใช้ที่จับคู่กับ voucher ชุดเดียวกัน">
+      {loading ? <div className="h-[360px] shimmer rounded-xl" /> : !report || report.activity.length === 0 ? <div className="flex h-[300px] flex-col items-center justify-center text-center"><Icon name="ticket" size={32} className="mb-3 text-faint" /><p className="text-sm font-medium text-default">ยังไม่พบข้อมูลการรับหรือใช้ voucher</p><p className="mt-1 text-xs text-muted">เมื่อมีการอัปเดตประวัติการรับและใช้ voucher แล้ว ข้อมูลจะแสดงที่นี่</p></div> : <VoucherActivityChart data={report.activity} showAll={showAllActivity} onShowAllChange={setShowAllActivity} />}
+      {!loading && activityRows.length ? <div className="sr-only"><table><caption>NFT Voucher Comparison data</caption><thead><tr><th scope="col">NFT name</th><th scope="col">Issued</th><th scope="col">Used</th></tr></thead><tbody>{activityRows.map((point) => <tr key={point.name}><th scope="row">{point.name}</th><td>{point.purchase}</td><td>{point.redeem}</td></tr>)}</tbody></table></div> : null}
     </Card> : null}
 
     {!error && canViewVouchers ? <section aria-labelledby="voucher-list-title">

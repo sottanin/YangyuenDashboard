@@ -2,13 +2,11 @@
 
 import { withExpandableChart, useExpandedPlotHeight } from '@/components/charts/ExpandableChart'
 
-import { useState } from 'react'
 import { NftRank } from '@/components/ui/NftRank'
 import { TokenAvatar } from '@/components/ui/TokenAvatar'
 export interface VoucherActivityPoint { name: string; purchase: number; redeem: number; tokenAddress: string; tokenId: string; imageUrl: string }
-interface VoucherActivityChartProps { data: VoucherActivityPoint[] }
-function VoucherActivityChartPlot({ data }: VoucherActivityChartProps): React.JSX.Element {
-  const [showAll, setShowAll] = useState(false)
+interface VoucherActivityChartProps { data: VoucherActivityPoint[]; showAll: boolean; onShowAllChange: (value: boolean) => void }
+function VoucherActivityChartPlot({ data, showAll, onShowAllChange }: VoucherActivityChartProps): React.JSX.Element {
   const rows = showAll ? data : data.slice(0, 10)
   const expandedHeight = useExpandedPlotHeight()
   const maximum = Math.max(1, ...data.flatMap((point) => [point.purchase, point.redeem]))
@@ -22,7 +20,7 @@ function VoucherActivityChartPlot({ data }: VoucherActivityChartProps): React.JS
         <dd className="min-w-7 text-right font-mono font-medium text-default">{series.value.toLocaleString()}</dd>
       </div>)}</dl>
     </div>)}</div>
-    {data.length > 10 ? <button type="button" className="btn btn-ghost mt-4 min-h-11 focus-visible:ring-2 focus-visible:ring-accent" aria-expanded={showAll} onClick={() => setShowAll((value) => !value)}>{showAll ? 'Show top 10' : `Show all ${data.length} voucher names`}</button> : null}
+    {data.length > 10 ? <button type="button" className="btn btn-ghost mt-4 min-h-11 focus-visible:ring-2 focus-visible:ring-accent" aria-expanded={showAll} onClick={() => onShowAllChange(!showAll)}>{showAll ? 'Show top 10' : `Show all ${data.length} voucher names`}</button> : null}
   </div>
 }
 

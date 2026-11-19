@@ -311,6 +311,26 @@ function zeroWalletBalances(): Record<WalletSnapshotBalanceField, Prisma.Decimal
   }
 }
 
+function walletBalanceFailureCategory(error: unknown): string {
+  if (!(error instanceof Error)) return 'generic_upstream'
+  if (error.name === 'TimeoutError' || error.name === 'AbortError') return 'timeout'
+  const http = /^(?:KubScan|KUB RPC) returned HTTP ([1-5]\d{2})$/.exec(error.message)
+  if (http) return `http_${http[1]}`
+  if (error.name === 'TypeError') return 'network'
+  const invalidResponseMessages = new Set([
+    'KubScan token-balance response is too large',
+    'KubScan returned an invalid token-balance response',
+    'KUB RPC response is too large',
+    'KUB RPC returned an empty response body',
+    'KUB RPC returned an incomplete batch response',
+    'KUB RPC returned invalid JSON-RPC data',
+    'KUB RPC returned an invalid or duplicate batch response id',
+    'KUB RPC returned an invalid balanceOfExpired batch result',
+  ])
+  if (error.name === 'SyntaxError' || invalidResponseMessages.has(error.message) || /^Missing expired balance for 0x[0-9a-f]{40}$/i.test(error.message)) return 'invalid_response'
+  return 'generic_upstream'
+}
+
 async function createWalletSyncLog(): Promise<{ id: string } | null> {
   return prisma.$transaction(async (tx) => {
     // Serializes the running-log check across requests without requiring a schema change.
@@ -381,8 +401,8 @@ export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
       }
     }
 
-    // Fetch a complete snapshot before changing any balances. This prevents a transient
-    // KubScan failure or cancellation from leaving every wallet partially reset to zero.
+    // Collect complete snapshots before changing balances. A failed wallet request
+    // contributes an all-zero snapshot; cancellation still prevents the atomic commit.
     const walletRows = await prisma.wallet.findMany({ orderBy: { id: 'asc' } })
     const uniqueWallets = new Map<string, (typeof walletRows)[number]>()
     for (const wallet of walletRows) {
@@ -422,24 +442,16 @@ export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
     const snapshots = new Map<string, Record<WalletSnapshotBalanceField, Prisma.Decimal>>()
 
     for (const wallet of allWallets) {
-      const currentLog = await prisma.batchJobLog.findUnique({
-        where: { id: log.id },
-        select: { status: true },
-      })
-      if (currentLog?.status !== 'running') {
-        throw new Error('Wallet sync was cancelled')
+      await assertJobRunning(log.id, coordinatorId)
+      if (!isValidAddress(wallet.walletId)) {
+        // Dirty legacy identifiers cannot be queried safely. Preserve the existing reset behavior.
+        snapshots.set(wallet.walletId, zeroWalletBalances())
+        console.warn('[WalletSync] Reset invalid legacy wallet identifier')
+        continue
       }
-      await assertPipelineActive(coordinatorId)
 
+      let update = zeroWalletBalances()
       try {
-        if (!isValidAddress(wallet.walletId)) {
-          // Dirty legacy identifiers cannot be queried safely. Keep them in the atomic
-          // reset snapshot, but do not let one malformed row block all valid wallets.
-          snapshots.set(wallet.walletId, zeroWalletBalances())
-          console.warn('[WalletSync] Reset invalid legacy wallet identifier')
-          continue
-        }
-
         const res = await fetch(
           `${KUBSCAN_ADDR}/${encodeURIComponent(wallet.walletId)}/token-balances`,
           { signal: AbortSignal.timeout(WALLET_BALANCE_FETCH_TIMEOUT_MS) },
@@ -449,7 +461,6 @@ export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
         }
 
         const balances = await readTokenBalanceResponse(res)
-        const update = zeroWalletBalances()
 
         for (const item of balances) {
           const mapped = mapCanonicalTokenBalance(item)
@@ -457,27 +468,26 @@ export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
           update[mapped.field] = mapped.value
         }
 
-        await assertJobRunning(log.id, coordinatorId)
         const expiredBalances = await readExpiredBalances(activePointTokenContracts.map((contract) => contract.address), wallet.walletId)
-        await assertJobRunning(log.id, coordinatorId)
         for (const contract of activePointTokenContracts) {
           const expiredBalance = expiredBalances.get(contract.address)
           if (expiredBalance === undefined) throw new Error(`Missing expired balance for ${contract.address}`)
           update[contract.expiredField] = new Prisma.Decimal(expiredBalance)
         }
-        snapshots.set(wallet.walletId, update)
-      } catch (err) {
-        console.error('[WalletSync] Error processing wallet balance:', err)
+      } catch (error: unknown) {
+        // Only upstream retrieval/parse work is recoverable. Database/cancellation
+        // checks stay outside that work, and must succeed before zeroing a wallet.
+        await assertJobRunning(log.id, coordinatorId)
+        update = zeroWalletBalances()
         errorCount++
+        console.warn(`[WalletSync] Wallet balance request failed (${walletBalanceFailureCategory(error)}); using an all-zero snapshot`)
       }
-    }
-
-    if (errorCount > 0) {
-      throw new Error(`Wallet snapshot aborted because ${errorCount} balance request(s) failed`)
+      await assertJobRunning(log.id, coordinatorId)
+      snapshots.set(wallet.walletId, update)
     }
 
     await assertPipelineActive(coordinatorId)
-    await prisma.$transaction(async (tx) => {
+    const committedUpdated = await prisma.$transaction(async (tx) => {
       // Serialize the final commit with another start/check and honor manual cancellation.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(93422001)`
       const currentLog = await tx.batchJobLog.findUnique({
@@ -494,14 +504,17 @@ export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
       // run. A table-wide reset here could erase a wallet inserted concurrently
       // after the fetch phase even though no KubScan snapshot was obtained for it.
       const syncedAt = new Date()
+      let updatedCount = 0
       for (const [walletId, balances] of snapshots) {
         const result = await tx.wallet.updateMany({
           where: { walletId: { equals: walletId, mode: 'insensitive' } },
           data: { ...balances, timestamp: syncedAt },
         })
-        totalUpdated += result.count
+        updatedCount += result.count
       }
+      return updatedCount
     }, { maxWait: 10_000, timeout: 300_000 })
+    totalUpdated = committedUpdated
 
     console.log(`[WalletSync] Done — inserted:${totalInserted} updated:${totalUpdated} errors:${errorCount}`)
 
@@ -514,7 +527,8 @@ export async function runWalletSyncJob(coordinatorId?: string): Promise<void> {
         totalInserted,
         totalUpdated,
         pagesScanned: errorCount,
-        stoppedReason: 'wallet_sync_done',
+        stoppedReason: errorCount > 0 ? 'wallet_sync_done_with_errors' : 'wallet_sync_done',
+        ...(errorCount > 0 ? { error: `${errorCount} wallet balance request(s) failed. All regular and expired balances for affected wallets were set to 0; other wallets were processed. Failed wallets will be retried on the next sync.` } : {}),
       },
     })
   } catch (err) {
